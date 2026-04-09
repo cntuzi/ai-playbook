@@ -2,251 +2,297 @@
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
-An autonomous iOS development agent that receives tasks via Feishu (Lark), dispatches coding work to AI agents, creates merge requests, and reports progress — all automatically.
+An autonomous development agent that bridges **structured specs** and **AI coding agents** — turning task descriptions into merge requests with zero human intervention in between.
 
-## What it does
+Built on [OpenClaw](https://github.com/nicepkg/openclaw) gateway + [Spec Orchestrator](https://github.com/cntuzi/spec-orchestrator) methodology.
+
+## Why This Exists
+
+AI can write code. But "write code" is only one step in a much longer chain:
 
 ```
-Developer sends task in Feishu
-    → Octopus acknowledges in 3 seconds
-    → Creates git worktree + tmux session
-    → Dispatches to Codex (coding) or Claude Code (review/docs)
-    → Monitors progress, sends thread updates
-    → On completion: commit → push → create MR → notify → cleanup
+Understand requirements → Find the right files → Read API contracts
+→ Write code → Build → Test → Commit → Push → Create MR → Notify → Clean up
 ```
 
-The developer's only job is to **send the task** and **review the MR**.
+If a human has to trigger each step, you've just replaced typing with prompting — same bottleneck, different keyboard.
 
-## Architecture
+The octopus agent removes the human from the middle of this chain. The human stays at the **edges**: defining what to build (via specs) and reviewing the result (via MR).
+
+## Core Insight: Three-Layer Separation
+
+The system is built on [Spec Orchestrator](https://github.com/cntuzi/spec-orchestrator)'s three-layer model:
+
+```
+┌─────────────────────────────────────────────┐
+│  Spec Layer — WHAT to build                 │
+│  Feature YAML + Task Board + API Contracts  │
+│  (spec-orchestrator)                        │
+└──────────────────┬──────────────────────────┘
+                   │ reads
+┌──────────────────▼──────────────────────────┐
+│  Agent Layer — HOW to build                 │
+│  Platform conventions + coding rules        │
+│  (agents/ios/ai/*.md, CLAUDE.md)            │
+└──────────────────┬──────────────────────────┘
+                   │ executes
+┌──────────────────▼──────────────────────────┐
+│  Worker Layer — Runtime execution           │
+│  Codex/Claude Code in isolated worktree     │
+│  (one instance per task, fully autonomous)  │
+└─────────────────────────────────────────────┘
+```
+
+**Spec** defines requirements, dependencies, acceptance criteria — shared between humans and AI, platform-agnostic.
+
+**Agent** defines platform conventions — Swift/UIKit patterns for iOS, Kotlin/Compose for Android. Lives in the platform repo.
+
+**Worker** is a runtime instance that combines both: reads Spec for context, follows Agent conventions for execution. Each worker runs in an isolated git worktree.
+
+### Where does the octopus fit?
+
+The octopus is the **orchestration layer** that connects these three layers at runtime:
+
+```
+                    ┌─────────────┐
+                    │   Human     │
+                    │ "执行 T20"   │
+                    └──────┬──────┘
+                           │ Feishu message
+                    ┌──────▼──────┐
+                    │   Octopus   │  ← Orchestrator
+                    │  (OpenClaw) │
+                    └──┬───┬───┬──┘
+                       │   │   │
+              ┌────────┘   │   └────────┐
+              │            │            │
+        ┌─────▼─────┐ ┌───▼───┐ ┌─────▼─────┐
+        │ Read Spec  │ │ Lock  │ │ Dispatch  │
+        │ Check deps │ │ Task  │ │ Worker    │
+        └───────────┘ └───────┘ └───────────┘
+                                      │
+                               ┌──────▼──────┐
+                               │   Worker    │
+                               │ (Codex in   │
+                               │  worktree)  │
+                               └──────┬──────┘
+                                      │
+                               ┌──────▼──────┐
+                               │  Automated  │
+                               │ commit/push │
+                               │  MR/notify  │
+                               └─────────────┘
+```
+
+The octopus **does not write code**. It reads specs, checks dependencies, locks tasks, dispatches workers, and handles the post-processing pipeline. This separation is critical.
+
+## Architecture: Why OpenClaw
+
+The octopus could have been a simple script. Why use OpenClaw as the gateway?
+
+### Problem: Chat-to-Pipeline Bridge
+
+Developers communicate via chat (Feishu/Slack/Discord). AI coding tools run in terminals. Someone has to bridge the gap — receive a chat message, understand intent, launch the right tool, and report back.
+
+### Solution: OpenClaw as Message Router
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                    Feishu (Lark)                     │
-│              WebSocket + REST API                    │
+│              WebSocket (persistent)                  │
 └──────────────────┬──────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────┐
 │              OpenClaw Gateway                        │
-│  - WebSocket message receiving                      │
-│  - Per-user session isolation (dmScope)             │
-│  - Message queue (collect mode, 3s debounce)        │
-│  - Route: feishu/octopus → octopus agent            │
-└──────────────────┬──────────────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────────────┐
-│           Octopus Agent Session                      │
-│  - Model: Claude Sonnet 4                           │
-│  - Role: Router (dispatch in <15s, don't execute)   │
-│  - Tools: bash, message, read, exec                 │
-└────────┬─────────────────────────┬──────────────────┘
-         │                         │
-    Code tasks                Non-code tasks
-         │                         │
-┌────────▼────────┐     ┌─────────▼─────────┐
-│  start-codex.sh │     │   Claude Code CLI  │
-│  (one command)  │     │   (tmux session)   │
-└────────┬────────┘     └───────────────────┘
-         │
-         ├── wt.sh (git worktree)
-         ├── tmux session: moox-t{nn}
-         │     ├── pane 0: Codex CLI
-         │     └── pane 1: monitor-codex.sh
-         │
-         └── On completion:
-              └── post-codex.sh
-                   ├── git commit (🐙 prefix)
-                   ├── git push
-                   ├── GitLab MR via API
-                   ├── Feishu notification
-                   └── Cleanup worktree + tmux
+│                                                      │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ Session Management                           │    │
+│  │ • per-channel-peer isolation                 │    │
+│  │ • conversation history per user              │    │
+│  │ • model + tools + workspace binding          │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                      │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ Message Queue                                │    │
+│  │ • collect mode: batch rapid messages         │    │
+│  │ • per-session FIFO: preserve order           │    │
+│  │ • cross-session parallel: maxConcurrent=4    │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                      │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ Agent Runtime                                │    │
+│  │ • LLM-powered intent classification          │    │
+│  │ • Tool execution (bash, message, file I/O)   │    │
+│  │ • Skill system (spec-drive, coding-agent)    │    │
+│  └─────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────┘
 ```
 
-## Key Design Decisions
+OpenClaw gives you:
+1. **Persistent connection** — WebSocket to Feishu, always listening
+2. **Session isolation** — each user gets independent conversation state
+3. **LLM-as-router** — the agent understands natural language intent, no rigid command parsing
+4. **Tool orchestration** — bash, file I/O, message sending, all coordinated by the LLM
+5. **Skill system** — modular capabilities (spec-drive, coding-agent) loaded as needed
 
-### 1. Agent as Router, Not Executor
+## The Dispatcher Pattern
 
-The octopus agent **does not read code, analyze specs, or write code**. It classifies the task (code vs non-code) and dispatches to the right tool. The heavy lifting happens inside Codex/Claude Code prompts.
+The most important design decision: **the octopus is a dispatcher, not an executor.**
 
-**Why:** Each agent turn blocks the message queue. A 60-second turn means the next message waits 60 seconds. By keeping turns under 15 seconds, we maintain responsiveness.
+### The Anti-Pattern (What We Tried First)
 
-### 2. Per-User Session Isolation
+```
+User: "执行 T20"
+Agent turn:
+  1. Read spec YAML (5s)
+  2. Read PRD section (3s)
+  3. Read API docs (3s)
+  4. Read Figma references (2s)
+  5. Analyze implementation approach (10s)
+  6. Create worktree (3s)
+  7. Write Codex prompt (2s)
+  8. Start Codex (2s)
+  9. Send confirmation (1s)
+Total: ~30 seconds blocking the message queue
+```
+
+During these 30 seconds, no other message can be processed in this session. Send two tasks? The second waits half a minute.
+
+### The Pattern (What Works)
+
+```
+User: "执行 T20"
+Agent turn:
+  1. Send confirmation (1s)
+  2. Write prompt file with spec paths (2s)
+  3. Call start-codex.sh in background (1s)
+  4. Send "dispatched" reply (1s)
+Total: ~5 seconds, then the session is free
+
+Meanwhile, in the background:
+  start-codex.sh → worktree → tmux → Codex reads specs itself
+```
+
+The key insight: **move all heavy work into the worker prompt**. The dispatcher doesn't read specs — it tells the worker where the specs are. The worker (Codex) reads them in its own context, with its own time budget.
+
+## Concurrency Model
+
+### Cross-User: Session Isolation
 
 ```jsonc
-{
-  "session": {
-    "dmScope": "per-channel-peer"  // each user gets their own session
-  }
-}
+{ "session": { "dmScope": "per-channel-peer" } }
 ```
 
-Without this, all DMs share one session — Alice's context leaks to Bob, and replies go to the wrong person. With `per-channel-peer`, each user+channel combination gets an isolated session with its own conversation history and delivery context.
-
-### 3. Notification Target Pinning
-
-Each task writes a `.feishu-target` file in its worktree at dispatch time. All subsequent notifications (progress, completion, MR link) read from this file — never from the session store.
-
-**Why:** In concurrent scenarios, querying the session store for the "current" delivery target returns whichever user was most recently active. Pinning the target at dispatch time prevents cross-talk.
-
-### 4. One Worktree Per Task
-
-Every coding task gets its own git worktree, tmux session, and Codex instance. Tasks are fully isolated — no shared state, no merge conflicts during execution.
-
 ```
-octopus (dispatcher)
-  ├── moox-t01   → Codex in worktree A
-  ├── moox-t03   → Codex in worktree B
-  ├── claude-review → Claude Code
-  └── claude-docs   → Claude Code
+User A → session:octopus:feishu:direct:A ──┐
+User B → session:octopus:feishu:direct:B ──┼── parallel (up to 4)
+Group X → session:octopus:feishu:group:X ──┘
 ```
 
-### 5. File Locking on macOS
+Each session has its own conversation history, delivery context, and processing queue. No cross-talk.
 
-Shared resources (Codex config, git operations in main repo) use `mkdir`-based locks instead of `flock` (not available on macOS). The lock is a directory — `mkdir` is atomic on all Unix systems.
+### Same-User: Fast Turn + Queue
 
-## Configuration
+Same user sends two tasks → same session → sequential turns. But with fast dispatch (~5s per turn), the second task starts almost immediately.
 
-### OpenClaw Agent Definition
+With `collect` mode + 3s debounce, rapid-fire messages get batched into one turn — the agent sees both tasks and dispatches both in parallel.
 
-```jsonc
-// openclaw.json → agents.list[]
-{
-  "id": "octopus",
-  "name": "octopus",
-  "workspace": "~/.openclaw/workspace-octopus",
-  "model": "anthropic/claude-sonnet-4-20250514",
-  "identity": {
-    "name": "章鱼哥",
-    "emoji": "🐙"
-  }
-}
-```
+### Notification Target Pinning
 
-### Channel Binding
-
-```jsonc
-// Route all Feishu messages from the octopus app to the octopus agent
-{
-  "type": "route",
-  "agentId": "octopus",
-  "match": {
-    "channel": "feishu",
-    "accountId": "octopus"
-  }
-}
-```
-
-### Concurrency Settings
-
-```jsonc
-{
-  "session": {
-    "dmScope": "per-channel-peer"
-  },
-  "messages": {
-    "queue": {
-      "mode": "collect",
-      "debounceMs": 3000
-    }
-  }
-}
-```
-
-## Workspace Structure
+The hardest concurrency bug: **who gets the notification?**
 
 ```
-workspace-octopus/
-├── IDENTITY.md        # Name, role, emoji
-├── SOUL.md            # Core values and personality
-├── USER.md            # Owner profile and preferences
-├── AGENTS.md          # Startup sequence, memory management
-├── TOOLS.md           # Execution rules, dispatch flow, red lines
-├── MEMORY.md          # Learnings and evolution log
-├── scripts/
-│   ├── start-codex.sh     # One-command task launcher
-│   ├── monitor-codex.sh   # Progress tracker + Feishu notifier
-│   ├── post-codex.sh      # Commit + push + MR + cleanup
-│   ├── feishu-notify.sh   # Feishu message sender (thread support)
-│   └── feishu.conf        # Shared Feishu API config
-└── memory/
-    └── *.md               # Daily logs and project knowledge
+Problem:
+  User A sends task → agent dispatches → monitor starts
+  User B sends task → becomes "most recent" session
+  User A's monitor queries "current target" → gets User B
+  User A's completion notification → sent to User B ✗
+
+Solution:
+  Dispatch writes .feishu-target to worktree (immutable after creation)
+  Monitor reads .feishu-target at startup → locks target forever
+  No runtime queries → no race conditions
 ```
 
-## Role Separation
+This is a general pattern: **pin context at dispatch time, never resolve it dynamically in concurrent workers.**
 
-| Role | Responsibility | Environment |
-|------|---------------|-------------|
-| Octopus | Dispatch, classify, notify, monitor | OpenClaw agent session |
-| Codex CLI | Write code (features, bugfixes, refactors) | Worktree + tmux |
-| Claude Code CLI | Non-code tasks (review, docs, git, analysis) | tmux |
+## The Execution Pipeline
 
-**Classification rule:** If it touches source files → Codex. Everything else → Claude Code.
-
-## Task Lifecycle
-
-### 1. Dispatch (< 15 seconds)
+### How Spec Orchestrator Connects to Octopus
 
 ```
-Receive message → Extract sender_id
-→ Send confirmation "🐙 Starting T{nn}..."
-→ Write prompt file to /tmp/
-→ Call start-codex.sh (background)
-→ Thread reply "🔧 Dispatched to Codex"
-→ Turn ends
+spec-orchestrator/                    Octopus Agent
+├── features/F02.yaml   ──────────>  reads task ID → finds feature
+├── tasks/ios.md        ──────────>  checks status (🔴=ready, 🟡=locked)
+├── config.yaml         ──────────>  checks dependencies + API readiness
+└── workflows/          ──────────>  follows spec-protocol phases
+        │
+        │  dispatches to
+        ▼
+Platform Repo (worktree)
+├── ai/ios.md           ──────────>  Worker reads platform conventions
+├── specs/ → symlink    ──────────>  Worker reads feature YAML
+└── src/                ──────────>  Worker writes code here
 ```
 
-### 2. Execution (automatic)
+The spec-orchestrator provides:
+- **Feature YAML** — requirements, API contracts, state matrix, i18n, analytics
+- **Task board** — status tracking with emoji markers (🔴🟡🟢)
+- **Dependency graph** — which tasks block which, API readiness flags
+- **Execution protocol** — the 7-step worker loop (Check → Collect → Code → Build → ...)
 
-`start-codex.sh` handles everything:
-1. Create worktree via `wt.sh`
-2. Write `.feishu-target` (pin notification target)
-3. Add worktree to Codex trust config (with file lock)
-4. Create tmux session with Codex + monitor
+The octopus reads this structure and dispatches workers that follow it.
 
-### 3. Monitoring (automatic)
+### Post-Processing: The Automated Tail
 
-`monitor-codex.sh` runs in tmux pane 1:
-- Locks Feishu target from `.feishu-target` at startup
-- Checks Codex state every 10 seconds
-- Sends progress snapshots every 5 minutes
-- Detects completion (BUILD SUCCEEDED/FAILED)
+Once Codex finishes writing code, the pipeline continues without human intervention:
 
-### 4. Post-processing (automatic)
+```
+Codex completes
+  → monitor-codex.sh detects "done" state
+  → post-codex.sh runs:
+      1. git commit with 🐙 prefix
+      2. git push to feature branch
+      3. Create MR via GitLab API
+      4. Send Feishu notification with MR link
+      5. Cleanup: kill tmux, remove worktree
+  → Task status updates: 🟡 → 🟢
+```
 
-`post-codex.sh` runs on completion:
-1. `git add + commit` with 🐙 prefix
-2. `git push` to feature branch
-3. Create MR via GitLab API
-4. Send Feishu notification with MR link
-5. Cleanup tmux session + worktree (with file lock)
+The 🐙 prefix on commits serves a practical purpose: `git log --oneline | grep 🐙` instantly shows all AI-generated commits.
 
 ## Lessons Learned
 
-### What worked
+### What we got right
 
-- **Thread-based progress tracking** — all updates in one Feishu thread per task, easy to follow
-- **Worktree isolation** — no merge conflicts, parallel tasks just work
-- **Agent as router** — keeping dispatch fast is critical for responsiveness
-- **🐙 commit prefix** — instantly identifies AI-generated commits in git log
+| Decision | Why it matters |
+|----------|---------------|
+| Dispatcher pattern | Keeps the message queue responsive; second task doesn't wait 60s |
+| Spec as contract | AI reads structured YAML, not vague chat messages — deterministic behavior |
+| Worktree per task | Complete isolation; parallel tasks can't corrupt each other |
+| Thread-based progress | All updates for one task in one Feishu thread — easy to track |
 
-### What didn't work
+### What we got wrong (and fixed)
 
-- **Agent doing spec analysis before dispatch** — made each turn 30-60 seconds, blocked the queue
-- **Shared session for all users** — replies went to the wrong person in concurrent scenarios
-- **`flock` on macOS** — doesn't exist, broke scripts silently with `set -e`
-- **Dynamic Feishu target lookup** — race condition in concurrent mode, last active user "wins"
+| Mistake | Root cause | Fix |
+|---------|-----------|-----|
+| All users shared one session | Default `dmScope: "main"` | Changed to `per-channel-peer` |
+| Notifications sent to wrong user | Dynamic target resolution in concurrent mode | Pin target in `.feishu-target` at dispatch time |
+| `flock` broke scripts on macOS | Linux assumption; `set -e` made it fatal | Replaced with `mkdir`-based locks |
+| Agent spent 60s reading specs | Dispatcher doing executor's job | Moved all spec reading into worker prompt |
 
-### What we'd do differently
+### Design principles (applicable beyond this project)
 
-- Pin the notification target from day one (not as a late fix)
-- Start with `per-channel-peer` session isolation (not `main`)
-- Keep all heavy work in the downstream agent prompts, never in the dispatcher
+1. **Separate orchestration from execution** — the thing that routes work should not do work
+2. **Pin context at dispatch time** — in concurrent systems, don't resolve state dynamically in workers
+3. **Make the contract explicit** — structured specs > natural language requirements
+4. **Isolation by default** — separate sessions, separate worktrees, separate notification targets
 
 ## Requirements
 
-- macOS (uses Keychain for secrets)
+- macOS
 - [OpenClaw](https://github.com/nicepkg/openclaw) gateway
+- [Spec Orchestrator](https://github.com/cntuzi/spec-orchestrator) (for spec structure)
 - Codex CLI or Claude Code CLI
-- tmux
-- Python 3 (JSON processing in scripts)
-- Feishu (Lark) bot application
-- GitLab instance (for MR creation)
+- tmux, Git, Python 3
+- Feishu (Lark) bot + GitLab instance

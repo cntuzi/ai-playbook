@@ -2,139 +2,244 @@
 
 [English](./README.md) | [中文](./README.zh-CN.md)
 
-A methodology for managing multi-platform app development with structured specs. AI agents parse specs, lock tasks, execute code changes, and update status — turning PRDs into merge requests.
+A methodology for bridging the gap between product requirements and AI-generated code — using structured specifications as the contract between humans and machines.
 
-## The Problem
+Open-source implementation: **[spec-orchestrator](https://github.com/cntuzi/spec-orchestrator)**
 
-Building a multi-platform app (iOS + Android + Backend) with AI coding agents creates coordination chaos:
-- Which tasks are ready? Which are blocked by backend APIs?
-- Who's working on what? Is T07 done or still in progress?
-- Where's the PRD? The Figma? The API docs?
-- Did the AI agent follow the spec, or hallucinate a different implementation?
+## The Core Problem
 
-## The Solution: Specs as Source of Truth
+AI coding tools have a context problem:
 
 ```
-specs/
-├── moox/
-│   ├── 1.4/                          # Version directory
-│   │   ├── features/
-│   │   │   ├── F01-chat.yaml         # Feature definition
-│   │   │   ├── F02-profile.yaml
-│   │   │   └── ...
-│   │   ├── tasks/
-│   │   │   ├── ios.md                # iOS task board (🔴🟡🟢)
-│   │   │   ├── android.md
-│   │   │   └── backend.md
-│   │   ├── prd/                      # Product requirements
-│   │   ├── design/                   # Figma index
-│   │   └── CHANGELOG.md
-│   └── api/                          # API documentation
-├── workflows/
-│   └── spec-protocol.md              # The workflow protocol
-└── AI-CONTEXT.md                     # Project quick reference
+Human developer reads:  PRD + Figma + API docs + codebase + team conventions + past decisions
+AI coding tool reads:   your one-line prompt
 ```
 
-### Task States
+The result: AI writes code that compiles but doesn't match the design, uses the wrong API fields, ignores edge cases, and violates team conventions. You spend more time correcting than you saved.
+
+The usual fix — stuffing everything into the prompt — doesn't scale. At 20 features and 3 platforms, manually assembling context for each task is the new bottleneck.
+
+## The Insight: Spec as Machine-Readable Contract
+
+The missing layer is a **structured specification** that sits between PRD and code:
 
 ```
-🔴 Not started
-🟡 In progress (locked by an agent)
-🟢 Completed (MR merged)
+PRD (natural language, for humans)
+    ↓
+Feature Spec (structured YAML, for humans AND AI)    ← this is the key
+    ↓
+Code (for the compiler)
 ```
 
-### Feature YAML
+A PRD says: "Users can edit their profile bio with a 3-line collapsed view that expands on tap."
+
+A Feature Spec says:
 
 ```yaml
 id: F02
 name: Profile Editing
-status: in-progress
 tasks:
   - id: T20
-    name: Bio 3-line collapse/expand
+    name: Bio collapse/expand
     platforms: [ios]
     depends_on: []
     api_ready: true
-    priority: high
+
+requirements:
+  - id: R01
+    desc: Bio text displays max 3 lines when collapsed
+  - id: R02
+    desc: Tap "more" expands to full text
+  - id: R03
+    desc: Tap "collapse" returns to 3-line view
+
+api:
+  - endpoint: GET /api/user/profile
+    response: { bio: string, bio_length: int }
+
+state_matrix:
+  - { state: empty_bio, trigger: no bio set, expected: "placeholder text shown" }
+  - { state: short_bio, trigger: "bio < 3 lines", expected: "full text, no expand button" }
+  - { state: long_bio, trigger: "bio >= 3 lines", expected: "truncated + 'more' button" }
+
+acceptance_criteria:
+  - id: AC01
+    type: ui
+    desc: Collapsed bio shows exactly 3 lines with ellipsis
+  - id: AC02
+    type: interaction
+    desc: Expand/collapse animation completes in < 300ms
 ```
 
-## Workflow Protocol
+Now AI has: exact requirements, the API response shape, all edge cases, and measurable acceptance criteria. No guessing.
+
+## Architecture: Three Layers
+
+[Spec Orchestrator](https://github.com/cntuzi/spec-orchestrator) implements a three-layer pipeline:
 
 ```
-1. Parse    → Read feature YAML + task definition
-2. Check    → Verify API readiness + dependency completion
-3. Lock     → Update task status 🔴→🟡, commit lock
-4. Collect  → Gather PRD + API docs + design context
-5. Execute  → Dispatch to Codex/Claude Code
-6. Verify   → Check build result
-7. Update   → Push + MR + update status 🟡→🟢
+┌─────────────────────────────────────────────────────────┐
+│  Generation Layer — /spec-init                          │
+│                                                          │
+│  PRD + Figma + Swagger API                              │
+│      ↓                                                   │
+│  Feature YAML × N + Task boards + i18n + Figma index    │
+│                                                          │
+│  One-shot: read all materials, generate complete spec    │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│  Orchestration Layer — /spec-drive                      │
+│                                                          │
+│  Dependency graph → Wave analysis → Worker dispatch     │
+│                                                          │
+│  "T20 depends on T03" → T03 first, then T20            │
+│  "T20 api_ready: false" → skip, notify team             │
+│  "T20 status: 🔴" → lock to 🟡, dispatch worker        │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│  Execution Layer — Worker                               │
+│                                                          │
+│  Check → Collect → Code → Build → Verify → Update      │
+│                                                          │
+│  Runs in isolated worktree                              │
+│  Reads Feature YAML for context                         │
+│  Follows platform Agent conventions for code style      │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### What the Agent Does vs. What Codex Does
+### Why Three Layers Matter
 
-| Step | Who | Action |
-|------|-----|--------|
-| Parse, Check, Lock | Octopus agent | Read YAML, verify deps, commit status change |
-| Collect, Execute | Codex (in worktree) | Read specs, write code, build |
-| Verify, Update | post-codex.sh | Push, create MR, update status |
+**Generation** is a one-time cost. You run `/spec-init` once per version. It reads your PRD, Figma, and API docs, then generates the complete spec skeleton. Humans review and refine.
 
-The spec protocol gives AI agents **structured context** instead of vague instructions. "Implement T20" becomes a fully traceable pipeline.
+**Orchestration** handles complexity that humans are bad at: dependency tracking across 20+ tasks on 3 platforms, remembering which APIs are ready, avoiding duplicate work. This is the [octopus agent](../octopus-agent/)'s domain.
 
-## Integration with Octopus Agent
+**Execution** is where AI writes code. But now it has complete context from the Feature YAML — requirements, API shapes, state matrix, acceptance criteria. No improvisation needed.
 
-The [Octopus Agent](../octopus-agent/) uses spec-drive as a skill:
+## The Spec-Agent-Worker Model
 
 ```
-User: "执行 T20"
-  → Octopus parses task ID from specs
-  → Checks if backend APIs are ready
-  → Locks task (🔴→🟡) with git commit
-  → Writes Codex prompt with spec references
-  → Dispatches via start-codex.sh
-  → On completion: push + MR + update (🟡→🟢)
+Spec  = WHAT to build     Feature YAML, task board, API contracts
+Agent = HOW to build       Platform conventions, coding rules, UI patterns
+Worker = Runtime instance   Combines both, executes in isolation
 ```
 
-## Key Principles
+This separation means:
+- **Same spec, different platforms**: iOS and Android workers read the same Feature YAML but follow different Agent conventions
+- **Spec changes don't require code changes**: update the YAML, re-dispatch the worker
+- **Agents evolve independently**: iOS team refines Swift patterns without touching specs
 
-### 1. Specs are Git-tracked
-
-Every status change is a git commit. You can `git blame` to see when a task was locked, by whom, and trace the full history.
+### Binding Mechanism
 
 ```
-🐙 lock: T20 进行中
-🐙 feat(T20): 个人中心简介3行折叠展开收起
-🐙 done: T20 完成，MR !11
+spec-orchestrator/              Platform repo (iOS)
+┌──────────────────┐           ┌──────────────────┐
+│ features/F02.yaml│──symlink──│ specs/F02.yaml   │
+│ tasks/ios.md     │──symlink──│ specs/tasks.md   │
+│ config.yaml      │           │                  │
+│                  │           │ ai/ios.md  (HOW) │
+│ agents/ios/      │───sync────│ CLAUDE.md  (HOW) │
+│   ai/ios.md      │           │                  │
+│   CLAUDE.md      │           │ src/    (code)   │
+└──────────────────┘           └──────────────────┘
 ```
 
-### 2. Tasks Have Explicit Dependencies
+The spec repo is the source of truth for WHAT. The platform repo is the source of truth for HOW. Workers read both.
+
+## Task Lifecycle and State Machine
+
+```
+🔴 Pending ──────→ 🟡 In Progress ──────→ 🟢 Completed
+                                               │
+                                          CR changes requirement
+                                               │
+                                          🔵 Rework ──→ 🟡 ──→ 🟢
+```
+
+Every state transition is a git commit:
+
+```
+🐙 lock: T20 进行中          (🔴 → 🟡)
+🐙 feat(T20): Bio 折叠展开    (code written)
+🐙 done: T20 完成, MR !11    (🟡 → 🟢)
+```
+
+`git blame tasks/ios.md` shows the complete history: who locked what, when, and the commit trail to the MR.
+
+### Dependency-Driven Dispatch
 
 ```yaml
-- id: T07
-  depends_on: [T03]      # Can't start until T03 is done
-  api_ready: false        # Backend API not deployed yet
+# config.yaml
+tasks:
+  - id: T03
+    depends_on: []
+    api_ready: true       # ← can start immediately
+
+  - id: T07
+    depends_on: [T03]     # ← blocked until T03 is 🟢
+    api_ready: false       # ← blocked until backend deploys
+
+  - id: T20
+    depends_on: []
+    api_ready: true        # ← can start immediately
 ```
 
-The agent checks these before starting. No wasted effort on blocked tasks.
+The orchestrator builds a dependency DAG and dispatches in waves:
+- **Wave 1**: T03, T20 (no dependencies, APIs ready) → parallel
+- **Wave 2**: T07 (after T03 completes AND API deploys) → wait
 
-### 3. One Task, One Worktree, One MR
+No human needs to track this. The spec encodes it, the orchestrator enforces it.
 
-Each task produces exactly one merge request from one isolated worktree. No mixed changes, no "this MR also fixes T08."
+## Change Management
 
-### 4. AI Reads the Same Specs as Humans
+The hardest part of multi-platform development: requirements change mid-sprint.
 
-The specs directory is symlinked into every worktree. Codex reads the same PRD, API docs, and design references that a human developer would.
+```
+API team: "We added a new field `bio_html` to the profile endpoint"
+
+Without spec-drive:
+  → iOS dev finds out when their code breaks
+  → Android dev doesn't know until next standup
+  → 2 days of rework
+
+With spec-drive:
+  /spec-drive change api /api/user/profile "Added bio_html field"
+  → Auto-traces: F02.yaml uses this API → T20, T21 affected
+  → Creates Change Record CR-001
+  → Marks T20, T21 for rework (🟢 → 🔵)
+  → /spec-drive propagate CR-001
+  → Workers apply targeted changes, rebuild, verify
+```
+
+The key: **specs encode the dependency graph between APIs and features**. When an API changes, impact analysis is automatic.
+
+## What This Is NOT
+
+- **Not a project management tool** — it doesn't replace Jira for human coordination
+- **Not a code generator** — it structures context for AI that generates code
+- **Not mandatory automation** — you can start with just YAML files, no tooling required
+
+The minimum viable adoption: one Feature YAML file per feature. Even without automation, it gives AI complete context. Add orchestration incrementally.
 
 ## Lessons Learned
 
-- **YAML > free-text** for task definitions — structured data is parseable by agents
-- **Status in git > status in Jira** — single source of truth, no sync issues
-- **Lock before execute** — prevents two agents from working on the same task
-- **API readiness checks save time** — blocked tasks fail fast instead of producing broken code
+| Insight | Why |
+|---------|-----|
+| YAML > free-text for task definitions | Structured data is parseable by agents; free-text requires interpretation |
+| Status in Git > status in Jira | Single source of truth; no sync lag between tracking tool and reality |
+| Lock before execute | Prevents two agents from working on the same task simultaneously |
+| API readiness as first-class concept | Blocked tasks fail fast instead of producing code against wrong API shapes |
+| One task = one worktree = one MR | Clean isolation; no "this MR also fixes T08" surprises |
+| Spec changes propagate automatically | Change tracking via dependency graph beats tribal knowledge |
 
 ## Getting Started
 
-1. Create a `specs/` directory in your project
-2. Define features as YAML files with task lists
-3. Use status markers (🔴🟡🟢) in task boards
-4. Point your AI agent at the specs directory
-5. Implement the parse → check → lock → execute → update protocol
+See the full implementation: **[github.com/cntuzi/spec-orchestrator](https://github.com/cntuzi/spec-orchestrator)**
+
+Quick path:
+1. Start with Feature YAML files — just structure your requirements
+2. Add task boards with status emoji (🔴🟡🟢)
+3. Add dependency tracking in config.yaml
+4. Integrate with an orchestrator ([octopus agent](../octopus-agent/) or your own)
+5. Enable full automation: `/spec-init` → `/spec-drive` → Workers

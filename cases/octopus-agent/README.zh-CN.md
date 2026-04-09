@@ -1,250 +1,296 @@
 # 章鱼哥 (Octopus Agent)
 
-一个自主 iOS 研发 agent，通过飞书接收任务，将编码工作派发给 AI agent，自动创建 MR 并推送进度 —— 全流程自动化。
+[English](./README.md) | [中文](./README.zh-CN.md)
 
-## 它做什么
+一个自主研发 agent，连接**结构化 spec** 和 **AI 编码 agent** —— 从任务描述到 MR，中间不需要人介入。
+
+基于 [OpenClaw](https://github.com/nicepkg/openclaw) 网关 + [Spec Orchestrator](https://github.com/cntuzi/spec-orchestrator) 方法论构建。
+
+## 为什么要做这个
+
+AI 能写代码。但「写代码」只是漫长链条中的一步：
 
 ```
-开发者在飞书发送任务
-    → 章鱼哥 3 秒内确认
-    → 创建 git worktree + tmux session
-    → 派发给 Codex（编码）或 Claude Code（review/文档）
-    → 监控进度，发送 thread 更新
-    → 完成后：commit → push → 创建 MR → 通知 → 清理
+理解需求 → 找到正确的文件 → 读 API 契约
+→ 写代码 → 构建 → 测试 → 提交 → 推送 → 创建 MR → 通知 → 清理
 ```
 
-开发者只需要 **发任务** 和 **review MR**。
+如果每一步都要人来触发，你只是把打字换成了发 prompt —— 瓶颈没变，只是换了个键盘。
 
-## 架构
+章鱼哥的目标：**把人从链条中间移除**。人只负责两端：定义要做什么（通过 spec）和审查结果（通过 MR）。
+
+## 核心洞察：三层分离
+
+系统基于 [Spec Orchestrator](https://github.com/cntuzi/spec-orchestrator) 的三层模型构建：
+
+```
+┌─────────────────────────────────────────────┐
+│  Spec 层 — 做什么                            │
+│  Feature YAML + 任务看板 + API 契约          │
+│  (spec-orchestrator)                        │
+└──────────────────┬──────────────────────────┘
+                   │ 读取
+┌──────────────────▼──────────────────────────┐
+│  Agent 层 — 怎么做                           │
+│  平台规范 + 编码规则                          │
+│  (agents/ios/ai/*.md, CLAUDE.md)            │
+└──────────────────┬──────────────────────────┘
+                   │ 执行
+┌──────────────────▼──────────────────────────┐
+│  Worker 层 — 运行时执行                      │
+│  Codex/Claude Code 在隔离的 worktree 中运行  │
+│  (每个任务一个实例，完全自主)                  │
+└─────────────────────────────────────────────┘
+```
+
+**Spec** 定义需求、依赖、验收标准 —— 人和 AI 共享，跨平台通用。
+
+**Agent** 定义平台规范 —— iOS 用 Swift/UIKit 的模式，Android 用 Kotlin/Compose 的模式。放在平台仓库里。
+
+**Worker** 是运行时实例，结合两者：读 Spec 获取上下文，遵循 Agent 规范执行。每个 Worker 在独立的 git worktree 中运行。
+
+### 章鱼哥在哪一层？
+
+章鱼哥是**编排层**，在运行时连接这三层：
+
+```
+                    ┌─────────────┐
+                    │     人      │
+                    │  "执行 T20"  │
+                    └──────┬──────┘
+                           │ 飞书消息
+                    ┌──────▼──────┐
+                    │   章鱼哥     │ ← 编排器
+                    │  (OpenClaw) │
+                    └──┬───┬───┬──┘
+                       │   │   │
+              ┌────────┘   │   └────────┐
+              │            │            │
+        ┌─────▼─────┐ ┌───▼───┐ ┌─────▼─────┐
+        │ 读取 Spec  │ │ 锁定  │ │  派发     │
+        │ 检查依赖   │ │ 任务  │ │  Worker   │
+        └───────────┘ └───────┘ └───────────┘
+                                      │
+                               ┌──────▼──────┐
+                               │   Worker    │
+                               │ (Codex 在   │
+                               │  worktree)  │
+                               └──────┬──────┘
+                                      │
+                               ┌──────▼──────┐
+                               │  自动化后处理 │
+                               │ commit/push │
+                               │  MR/通知     │
+                               └─────────────┘
+```
+
+章鱼哥**不写代码**。它读 spec、检查依赖、锁定任务、派发 worker、处理后续流水线。这个分离是关键。
+
+## 架构：为什么用 OpenClaw
+
+章鱼哥可以是一个简单脚本。为什么要用 OpenClaw 做网关？
+
+### 问题：聊天到流水线的桥梁
+
+开发者用聊天工具（飞书/Slack/Discord）沟通。AI 编码工具在终端运行。中间需要有人搭桥 —— 接收聊天消息、理解意图、启动正确的工具、汇报结果。
+
+### 方案：OpenClaw 作为消息路由
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                       飞书                           │
-│              WebSocket + REST API                    │
+│              WebSocket（持久连接）                    │
 └──────────────────┬──────────────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────────────┐
 │              OpenClaw Gateway                        │
-│  - WebSocket 接收消息                                │
-│  - 按用户隔离 session（dmScope）                     │
-│  - 消息队列（collect 模式，3 秒去重）                 │
-│  - 路由：feishu/octopus → octopus agent              │
-└──────────────────┬──────────────────────────────────┘
-                   │
-┌──────────────────▼──────────────────────────────────┐
-│           Octopus Agent Session                      │
-│  - 模型：Claude Sonnet 4                             │
-│  - 角色：路由器（15 秒内派发，不自己执行）             │
-│  - 工具：bash, message, read, exec                   │
-└────────┬─────────────────────────┬──────────────────┘
-         │                         │
-      代码任务                  非代码任务
-         │                         │
-┌────────▼────────┐     ┌─────────▼─────────┐
-│  start-codex.sh │     │   Claude Code CLI  │
-│  （一条命令搞定） │     │   （tmux session）  │
-└────────┬────────┘     └───────────────────┘
-         │
-         ├── wt.sh（git worktree）
-         ├── tmux session: moox-t{nn}
-         │     ├── pane 0: Codex CLI
-         │     └── pane 1: monitor-codex.sh
-         │
-         └── 完成后：
-              └── post-codex.sh
-                   ├── git commit（🐙 前缀）
-                   ├── git push
-                   ├── GitLab MR（API 创建）
-                   ├── 飞书通知
-                   └── 清理 worktree + tmux
+│                                                      │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ Session 管理                                 │    │
+│  │ • per-channel-peer 隔离                      │    │
+│  │ • 每个用户独立对话历史                         │    │
+│  │ • 模型 + 工具 + 工作区绑定                     │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                      │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ 消息队列                                     │    │
+│  │ • collect 模式：批量合并快速连发的消息          │    │
+│  │ • session 内 FIFO：保证顺序                   │    │
+│  │ • 跨 session 并行：最多 maxConcurrent=4       │    │
+│  └─────────────────────────────────────────────┘    │
+│                                                      │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ Agent 运行时                                  │    │
+│  │ • LLM 驱动的意图分类                          │    │
+│  │ • 工具执行（bash, message, 文件 I/O）         │    │
+│  │ • 技能系统（spec-drive, coding-agent）        │    │
+│  └─────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────┘
 ```
 
-## 关键设计决策
+OpenClaw 提供：
+1. **持久连接** —— WebSocket 连飞书，始终在线
+2. **Session 隔离** —— 每个用户独立的对话状态
+3. **LLM 做路由** —— agent 理解自然语言意图，不需要死板的命令解析
+4. **工具编排** —— bash、文件操作、消息发送，全由 LLM 协调
+5. **技能系统** —— 模块化能力（spec-drive, coding-agent），按需加载
 
-### 1. Agent 是路由器，不是执行者
+## 调度器模式
 
-章鱼哥 **不读代码、不分析 spec、不写代码**。它只做任务分类（代码 vs 非代码）并派发给对应工具。重活在 Codex/Claude Code 的 prompt 里完成。
+最重要的设计决策：**章鱼哥是调度器，不是执行者。**
 
-**为什么：** 每个 agent turn 会阻塞消息队列。一个 turn 跑 60 秒，下一条消息就等 60 秒。把 turn 控制在 15 秒内，才能保持响应速度。
+### 反模式（我们最初的做法）
 
-### 2. 按用户隔离 Session
+```
+用户: "执行 T20"
+Agent turn:
+  1. 读 spec YAML (5s)
+  2. 读 PRD 段落 (3s)
+  3. 读 API 文档 (3s)
+  4. 读 Figma 引用 (2s)
+  5. 分析实现方案 (10s)
+  6. 创建 worktree (3s)
+  7. 写 Codex prompt (2s)
+  8. 启动 Codex (2s)
+  9. 发确认消息 (1s)
+合计: ~30 秒阻塞消息队列
+```
+
+这 30 秒内，session 中的其他消息都在排队。发两个任务？第二个等半分钟。
+
+### 正确模式
+
+```
+用户: "执行 T20"
+Agent turn:
+  1. 发确认消息 (1s)
+  2. 写 prompt 文件，包含 spec 路径 (2s)
+  3. 后台调用 start-codex.sh (1s)
+  4. 发「已派发」回复 (1s)
+合计: ~5 秒，session 释放
+
+与此同时，在后台：
+  start-codex.sh → worktree → tmux → Codex 自己读 spec
+```
+
+核心洞察：**把所有重活放进 worker prompt**。调度器不读 spec —— 它告诉 worker spec 在哪。Worker (Codex) 在自己的上下文里读，用自己的时间预算。
+
+## 并发模型
+
+### 跨用户：Session 隔离
 
 ```jsonc
-{
-  "session": {
-    "dmScope": "per-channel-peer"  // 每个用户独立 session
-  }
-}
+{ "session": { "dmScope": "per-channel-peer" } }
 ```
 
-不加这个，所有私聊共享一个 session —— A 的上下文泄露给 B，回复发错人。加了 `per-channel-peer`，每个「用户+通道」组合有独立的 session、对话历史和投递目标。
-
-### 3. 通知目标锁定
-
-每个任务在派发时把 `.feishu-target` 文件写入 worktree。后续所有通知（进度、完成、MR 链接）都从这个文件读 —— 绝不查 session 存储。
-
-**为什么：** 并发场景下，查 session 存储拿到的是「最近活跃的用户」。如果用户 B 刚发了消息，用户 A 的任务通知就发给 B 了。在派发时锁定目标，杜绝串线。
-
-### 4. 一个任务一个 Worktree
-
-每个编码任务有自己的 git worktree、tmux session 和 Codex 实例。任务之间完全隔离 —— 没有共享状态，执行期间不会有合并冲突。
-
 ```
-章鱼哥（调度者）
-  ├── moox-t01   → Codex 在 worktree A
-  ├── moox-t03   → Codex 在 worktree B
-  ├── claude-review → Claude Code
-  └── claude-docs   → Claude Code
+用户 A → session:octopus:feishu:direct:A ──┐
+用户 B → session:octopus:feishu:direct:B ──┼── 并行（最多 4 个）
+群聊 X → session:octopus:feishu:group:X ──┘
 ```
 
-### 5. macOS 上的文件锁
+每个 session 有独立的对话历史、投递目标和处理队列。不会串。
 
-共享资源（Codex 配置、主仓库的 git 操作）使用 `mkdir` 做锁，而不是 `flock`（macOS 上没有）。锁就是一个目录 —— `mkdir` 在所有 Unix 系统上都是原子操作。
+### 同用户：快速 Turn + 队列
 
-## 配置
+同一用户发两个任务 → 同一个 session → 顺序处理。但调度只需 ~5 秒/turn，第二个任务几乎立刻开始。
 
-### OpenClaw Agent 定义
+`collect` 模式 + 3 秒去重：快速连发的消息被合并成一个 turn —— agent 同时看到两个任务，并行派发。
 
-```jsonc
-// openclaw.json → agents.list[]
-{
-  "id": "octopus",
-  "name": "octopus",
-  "workspace": "~/.openclaw/workspace-octopus",
-  "model": "anthropic/claude-sonnet-4-20250514",
-  "identity": {
-    "name": "章鱼哥",
-    "emoji": "🐙"
-  }
-}
-```
+### 通知目标锁定
 
-### 通道绑定
-
-```jsonc
-// 飞书 octopus 应用的所有消息 → octopus agent
-{
-  "type": "route",
-  "agentId": "octopus",
-  "match": {
-    "channel": "feishu",
-    "accountId": "octopus"
-  }
-}
-```
-
-### 并发设置
-
-```jsonc
-{
-  "session": {
-    "dmScope": "per-channel-peer"
-  },
-  "messages": {
-    "queue": {
-      "mode": "collect",
-      "debounceMs": 3000
-    }
-  }
-}
-```
-
-## 工作区结构
+最难的并发 bug：**通知发给谁？**
 
 ```
-workspace-octopus/
-├── IDENTITY.md        # 名称、角色、emoji
-├── SOUL.md            # 核心价值观和人格
-├── USER.md            # 用户画像和偏好
-├── AGENTS.md          # 启动流程、内存管理
-├── TOOLS.md           # 执行规范、派发流程、红线
-├── MEMORY.md          # 学习记录和进化日志
-├── scripts/
-│   ├── start-codex.sh     # 一键任务启动器
-│   ├── monitor-codex.sh   # 进度跟踪 + 飞书通知
-│   ├── post-codex.sh      # commit + push + MR + 清理
-│   ├── feishu-notify.sh   # 飞书消息发送（支持 thread）
-│   └── feishu.conf        # 共享飞书 API 配置
-└── memory/
-    └── *.md               # 日志和项目知识
+问题：
+  用户 A 发任务 → agent 派发 → monitor 启动
+  用户 B 发任务 → 变成「最近活跃」session
+  用户 A 的 monitor 查询「当前目标」→ 拿到用户 B
+  用户 A 的完成通知 → 发给了用户 B ✗
+
+解法：
+  派发时写 .feishu-target 到 worktree（创建后不可变）
+  Monitor 启动时读 .feishu-target → 永久锁定目标
+  不做运行时查询 → 没有竞态条件
 ```
 
-## 角色分工
+这是一个通用模式：**在派发时锁定上下文，不要在并发 worker 中动态解析状态。**
 
-| 角色 | 职责 | 执行环境 |
-|------|------|---------|
-| 章鱼哥 | 派发、分类、通知、监控 | OpenClaw agent session |
-| Codex CLI | 写代码（功能开发、Bug 修复、重构）| Worktree + tmux |
-| Claude Code CLI | 非代码任务（review、文档、git、分析）| tmux |
-
-**分类规则：** 涉及源代码文件 → Codex。其他一切 → Claude Code。
-
-## 任务生命周期
-
-### 1. 派发（< 15 秒）
+## Spec Orchestrator 如何连接章鱼哥
 
 ```
-收到消息 → 提取 sender_id
-→ 发确认「🐙 开始执行 T{nn}...」
-→ 写 prompt 文件到 /tmp/
-→ 调用 start-codex.sh（后台模式）
-→ thread 回复「🔧 已派发给 Codex」
-→ turn 结束
+spec-orchestrator/                    章鱼哥 Agent
+├── features/F02.yaml   ──────────>  读任务 ID → 找到功能定义
+├── tasks/ios.md        ──────────>  检查状态（🔴=就绪, 🟡=已锁定）
+├── config.yaml         ──────────>  检查依赖 + API 就绪状态
+└── workflows/          ──────────>  遵循 spec-protocol 阶段
+        │
+        │  派发到
+        ▼
+平台仓库（worktree）
+├── ai/ios.md           ──────────>  Worker 读平台规范
+├── specs/ → symlink    ──────────>  Worker 读 Feature YAML
+└── src/                ──────────>  Worker 在这里写代码
 ```
 
-### 2. 执行（自动）
+Spec Orchestrator 提供：
+- **Feature YAML** —— 需求、API 契约、状态矩阵、i18n、埋点
+- **任务看板** —— emoji 状态标记（🔴🟡🟢）
+- **依赖图** —— 哪些任务阻塞哪些，API 就绪标记
+- **执行协议** —— Worker 的 7 步循环（Check → Collect → Code → Build → ...）
 
-`start-codex.sh` 自动处理一切：
-1. 通过 `wt.sh` 创建 worktree
-2. 写入 `.feishu-target`（锁定通知目标）
-3. 将 worktree 加入 Codex trust 配置（带文件锁）
-4. 创建 tmux session，启动 Codex + monitor
+章鱼哥读这套结构，派发遵循它的 worker。
 
-### 3. 监控（自动）
+### 自动化后处理
 
-`monitor-codex.sh` 运行在 tmux pane 1：
-- 启动时从 `.feishu-target` 锁定飞书目标
-- 每 10 秒检测 Codex 状态
-- 每 5 分钟发送进度快照
-- 检测完成（BUILD SUCCEEDED/FAILED）
+Codex 写完代码后，流水线继续运行，无需人介入：
 
-### 4. 后处理（自动）
+```
+Codex 完成
+  → monitor 检测到 "done" 状态
+  → post-codex.sh 运行：
+      1. git commit（🐙 前缀）
+      2. git push 到特性分支
+      3. GitLab API 创建 MR
+      4. 飞书通知（含 MR 链接）
+      5. 清理：停 tmux，删 worktree
+  → 任务状态更新：🟡 → 🟢
+```
 
-`post-codex.sh` 在完成时运行：
-1. `git add + commit`（🐙 前缀）
-2. `git push` 到特性分支
-3. 通过 GitLab API 创建 MR
-4. 飞书通知（含 MR 链接）
-5. 清理 tmux session + worktree（带文件锁）
+🐙 commit 前缀的实际用途：`git log --oneline | grep 🐙` 一眼看出所有 AI 生成的提交。
 
 ## 踩坑记录
 
-### 有效的做法
+### 做对了什么
 
-- **基于 Thread 的进度追踪** —— 每个任务一个飞书 thread，所有更新集中在一起
-- **Worktree 隔离** —— 没有合并冲突，并行任务互不干扰
-- **Agent 做路由器** —— 快速派发是保持响应的关键
-- **🐙 commit 前缀** —— 在 git log 里一眼识别 AI 生成的提交
+| 决策 | 为什么重要 |
+|------|-----------|
+| 调度器模式 | 保持消息队列响应；第二个任务不用等 60 秒 |
+| Spec 做契约 | AI 读结构化 YAML，不是模糊的聊天消息 —— 行为可预测 |
+| Worktree 隔离 | 完全隔离；并行任务互不干扰 |
+| Thread 进度追踪 | 一个任务的所有更新在一个飞书 thread 里 —— 好跟踪 |
 
-### 踩过的坑
+### 做错了什么（以及修复）
 
-- **Agent 在派发前分析 spec** —— 每个 turn 30-60 秒，阻塞消息队列
-- **所有用户共享一个 session** —— 并发时回复发错人
-- **macOS 上用 `flock`** —— 根本不存在，`set -e` 下静默失败
-- **动态查询飞书目标** —— 并发场景下竞态条件，最后活跃的用户「赢了」
+| 错误 | 根因 | 修复 |
+|------|------|------|
+| 所有用户共享一个 session | 默认 `dmScope: "main"` | 改为 `per-channel-peer` |
+| 通知发错人 | 并发模式下动态解析目标 | 派发时用 `.feishu-target` 锁定 |
+| `flock` 在 macOS 上崩 | Linux 假设；`set -e` 让错误变成致命 | 改用 `mkdir` 做锁 |
+| Agent 花 60 秒读 spec | 调度器干了执行者的活 | 所有 spec 读取移到 worker prompt |
 
-### 如果重来
+### 设计原则（适用于这个项目之外）
 
-- 从第一天就锁定通知目标（不要事后补）
-- 一开始就用 `per-channel-peer` session 隔离（不要用默认的 `main`）
-- 所有重活放在下游 agent prompt 里，调度器永远不做
+1. **分离编排和执行** —— 路由工作的东西不应该做工作
+2. **在派发时锁定上下文** —— 并发系统中，不要在 worker 里动态解析状态
+3. **让契约显式化** —— 结构化 spec > 自然语言需求
+4. **默认隔离** —— 独立 session、独立 worktree、独立通知目标
 
 ## 前置要求
 
-- macOS（使用 Keychain 存储密钥）
-- [OpenClaw](https://github.com/nicepkg/openclaw) gateway
+- macOS
+- [OpenClaw](https://github.com/nicepkg/openclaw) 网关
+- [Spec Orchestrator](https://github.com/cntuzi/spec-orchestrator)（spec 结构）
 - Codex CLI 或 Claude Code CLI
-- tmux
-- Python 3（脚本中的 JSON 处理）
-- 飞书机器人应用
-- GitLab 实例（用于创建 MR）
+- tmux, Git, Python 3
+- 飞书机器人应用 + GitLab 实例
