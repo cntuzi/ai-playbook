@@ -1,5 +1,7 @@
 # Spec-Driven Development
 
+[English](./README.md) | [中文](./README.zh-CN.md)
+
 A methodology for managing multi-platform app development with structured specs. AI agents parse specs, lock tasks, execute code changes, and update status — turning PRDs into merge requests.
 
 ## The Problem

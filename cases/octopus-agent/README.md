@@ -1,5 +1,7 @@
 # Octopus Agent (章鱼哥)
 
+[English](./README.md) | [中文](./README.zh-CN.md)
+
 An autonomous iOS development agent that receives tasks via Feishu (Lark), dispatches coding work to AI agents, creates merge requests, and reports progress — all automatically.
 
 ## What it does
