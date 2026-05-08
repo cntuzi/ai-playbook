@@ -1,0 +1,16 @@
+node_modules/
+.DS_Store
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime output
+*.log
+*.pid
+run/
+tmp/
+coverage/

@@ -1,0 +1,27 @@
+{
+  "name": "lark-agent-bridge-skill",
+  "version": "0.1.0",
+  "description": "Codex skill and local tools that bridge Feishu/Lark bot messages to tmux-hosted AI agent sessions.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "lark-agent-bridge-manager": "scripts/manager.mjs",
+    "lark-agent-bridge-feedback": "scripts/feedback.mjs",
+    "lark-agent-bridge-start": "scripts/start-bridge.mjs",
+    "lark-agent-bridge-tmux": "scripts/tmux-pane-bridge.mjs"
+  },
+  "files": [
+    "SKILL.md",
+    "README.md",
+    "LICENSE",
+    "agents",
+    "references",
+    "scripts"
+  ],
+  "scripts": {
+    "check": "node --check scripts/manager.mjs && node --check scripts/tmux-pane-bridge.mjs && node --check scripts/feedback.mjs && node --check scripts/start-bridge.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

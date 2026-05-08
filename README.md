@@ -18,6 +18,12 @@ An autonomous iOS development agent built on [OpenClaw](https://github.com/nicep
 
 **Stack:** OpenClaw + Claude Sonnet + Codex CLI + Feishu + GitLab
 
+### [Lark Agent Bridge](./cases/lark-agent-bridge/)
+
+A lightweight local bridge that routes Feishu/Lark bot messages into existing Codex/Claude Code sessions running in tmux, with an Agent management page and progress/result feedback.
+
+**Stack:** Node.js + lark-cli + tmux + Codex CLI + Feishu/Lark
+
 ### [Spec-Driven Development](./cases/spec-drive/)
 
 A methodology for managing multi-platform app development with structured specs. AI agents parse specs, lock tasks, execute code changes, and update status — turning PRDs into merge requests.
@@ -54,6 +60,12 @@ A methodology for managing multi-platform app development with structured specs.
 基于 [OpenClaw](https://github.com/nicepkg/openclaw) 的自主 iOS 研发 agent。通过飞书接收任务，派发给 Codex/Claude Code 执行，自动创建 MR 并推送进度通知。
 
 **技术栈：** OpenClaw + Claude Sonnet + Codex CLI + 飞书 + GitLab
+
+### [Lark Agent Bridge](./cases/lark-agent-bridge/)
+
+一个轻量级本地桥接工具，把飞书 / Lark 机器人消息路由到 tmux 中已有的 Codex/Claude Code 会话，并提供 Agent 管理页、进度回传和结果回传。
+
+**技术栈：** Node.js + lark-cli + tmux + Codex CLI + 飞书 / Lark
 
 ### [Spec 驱动开发](./cases/spec-drive/)
 

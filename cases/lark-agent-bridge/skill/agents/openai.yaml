@@ -1,0 +1,7 @@
+interface:
+  display_name: "Lark Agent Bridge"
+  short_description: "Bridge Lark bots to local Agent sessions."
+  default_prompt: "Use $lark-agent-bridge to connect a Lark bot to a local Agent work session."
+
+policy:
+  allow_implicit_invocation: true
