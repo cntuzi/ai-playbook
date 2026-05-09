@@ -233,6 +233,21 @@ The minimum viable adoption: one Feature YAML file per feature. Even without aut
 | One task = one worktree = one MR | Clean isolation; no "this MR also fixes T08" surprises |
 | Spec changes propagate automatically | Change tracking via dependency graph beats tribal knowledge |
 
+## Documentation
+
+Deep-dive guides for each aspect of the methodology:
+
+| Document | Description |
+|----------|-------------|
+| [Tutorial](./tutorial.md) | Start here — beginner-friendly introduction from zero |
+| [Toolchain Overview](./overview.md) | CLI commands, data flow, and directory structure |
+| [Architecture](./architecture.md) | Three-layer system design, state lifecycle, branching strategy |
+| [Spec Generation](./spec-generation.md) | How to generate specs from PRD + Figma + Swagger |
+| [Spec Init Guide](./spec-init.md) | `/spec-init` command: modes, inputs, outputs, schema |
+| [Spec Drive Guide](./spec-drive-guide.md) | `/spec-drive` orchestration: subcommands, workflows, change management |
+| [Execution Protocol](./exec-protocol.md) | Seven-step protocol for individual task execution |
+| [Glossary](./glossary.md) | Term reference organized by layer |
+
 ## Getting Started
 
 See the full implementation: **[github.com/cntuzi/spec-orchestrator](https://github.com/cntuzi/spec-orchestrator)**

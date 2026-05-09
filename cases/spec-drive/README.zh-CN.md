@@ -233,6 +233,21 @@ tasks:
 | 一个任务 = 一个 worktree = 一个 MR | 干净隔离；不会有「这个 MR 顺便修了 T08」 |
 | Spec 变更自动传播 | 依赖图驱动的变更追踪完胜口头传达 |
 
+## 详细文档
+
+方法论各环节的深度指南：
+
+| 文档 | 说明 |
+|------|------|
+| [入门教程](./tutorial.zh-CN.md) | 从这里开始 —— 从零理解的新手教程 |
+| [工具链总览](./overview.zh-CN.md) | CLI 命令、数据流、目录结构 |
+| [系统架构](./architecture.zh-CN.md) | 三层架构设计、状态生命周期、分支策略 |
+| [Spec 生成](./spec-generation.zh-CN.md) | 如何从 PRD + Figma + Swagger 生成规格 |
+| [Spec Init 指南](./spec-init.zh-CN.md) | `/spec-init` 命令：模式、输入、输出、Schema |
+| [Spec Drive 指南](./spec-drive-guide.zh-CN.md) | `/spec-drive` 编排：子命令、工作流、变更管理 |
+| [执行协议](./exec-protocol.zh-CN.md) | 单任务执行的七步标准流程 |
+| [术语表](./glossary.zh-CN.md) | 按层级组织的术语参考 |
+
 ## 快速开始
 
 完整实现：**[github.com/cntuzi/spec-orchestrator](https://github.com/cntuzi/spec-orchestrator)**
