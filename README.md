@@ -30,11 +30,9 @@ A methodology for managing multi-platform app development with structured specs.
 
 **Stack:** Markdown specs + OpenClaw skills + Git worktrees + tmux
 
-### [macOS VPN Auto-Connect with TOTP](./cases/macos-vpn-totp-autoconnect/)
+## Tips
 
-Fully unattended daily VPN connection where the password includes a rotating TOTP code — computed locally from the MFA secret, no phone needed. Includes the Keychain partition-ID trap that silently breaks Tunnelblick.
-
-**Stack:** Tunnelblick + macOS Keychain + python3 + launchd + pmset
+Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
 
 ## Philosophy
 
@@ -79,11 +77,11 @@ Fully unattended daily VPN connection where the password includes a rotating TOT
 
 **技术栈：** Markdown specs + OpenClaw skills + Git worktrees + tmux
 
-### [macOS VPN 自动连接（TOTP 动态码）](./cases/macos-vpn-totp-autoconnect/)
+## 小技巧
 
-每天全自动连接密码含 TOTP 动态码的 VPN——动态码由 MFA 密钥本地计算，不需要手机。附钥匙串 partition ID 静默搞挂 Tunnelblick 的踩坑记录。
+独立的小技巧记录，不成体系但实用：
 
-**技术栈：** Tunnelblick + macOS 钥匙串 + python3 + launchd + pmset
+- [macOS 脚本自动连接带 TOTP 动态码的 VPN](./tips/macos-vpn-totp-autoconnect.md) —— 动态码本地计算 + 钥匙串 partition ID 坑
 
 ## 理念
 
