@@ -30,6 +30,12 @@ A methodology for managing multi-platform app development with structured specs.
 
 **Stack:** Markdown specs + OpenClaw skills + Git worktrees + tmux
 
+### [macOS VPN Auto-Connect with TOTP](./cases/macos-vpn-totp-autoconnect/)
+
+Fully unattended daily VPN connection where the password includes a rotating TOTP code — computed locally from the MFA secret, no phone needed. Includes the Keychain partition-ID trap that silently breaks Tunnelblick.
+
+**Stack:** Tunnelblick + macOS Keychain + python3 + launchd + pmset
+
 ## Philosophy
 
 - **Document working systems**, not hypothetical architectures
@@ -72,6 +78,12 @@ A methodology for managing multi-platform app development with structured specs.
 一套管理多端应用开发的方法论。用结构化 spec 管理任务，AI agent 解析 spec、锁定任务、执行代码变更、更新状态 —— 把 PRD 变成 MR。
 
 **技术栈：** Markdown specs + OpenClaw skills + Git worktrees + tmux
+
+### [macOS VPN 自动连接（TOTP 动态码）](./cases/macos-vpn-totp-autoconnect/)
+
+每天全自动连接密码含 TOTP 动态码的 VPN——动态码由 MFA 密钥本地计算，不需要手机。附钥匙串 partition ID 静默搞挂 Tunnelblick 的踩坑记录。
+
+**技术栈：** Tunnelblick + macOS 钥匙串 + python3 + launchd + pmset
 
 ## 理念
 
