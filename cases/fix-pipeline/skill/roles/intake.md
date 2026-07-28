@@ -40,21 +40,32 @@ orca linear comment add <ISSUE> --body "补充复现：<新证据>" --json
 
 证据写**路径**，不贴正文 —— 你的 context 只留 id 和路径。
 
-### 5. 双写
+### 5. 双写（**先 Linear，后 task**，顺序不能反）
+
+`task-create` 之后 **spec 不可修改**（`task-update` 只接受 `--status` 和 `--result`），而 Linear issue 随时能用 `save-issue` 改。所以先建 Linear 拿到 id，再把 id 写进 task 的 spec：
 
 ```bash
+# 1. 先建 Linear，拿 identifier
+orca linear create --team <TEAM> --title "<一句话现象>" \
+  --body "<五段 spec>" --state Todo --label "<分类>" --json
+
+# 2. 再建 task，spec 末尾带上 linear id
 orca orchestration task-create \
   --task-title "<一句话现象>" \
   --spec "$(cat <<'EOF'
 <五段 spec>
+
+linear: <ISSUE>
 EOF
 )" --json
 
-orca linear create --team <TEAM> --title "<一句话现象>" \
-  --body "<五段 spec>" --state Todo --label "<分类>" --json
+# 3. 回填 Linear，body 末尾补 orchestration task id
+orca linear save-issue <ISSUE> --description "<原 body>
+
+orchestration task: task_xxx" --json
 ```
 
-两边互记对方 id：Linear 的 body 末尾写 `task: task_xxx`，task 的 spec 末尾写 `linear: <ISSUE>`。
+顺序反了的补救：把 id 塞进 `task-update --result '{"linear":"<ISSUE>"}'`。能用，但 `result` 的语义是 worker 完成回执，塞交叉引用是脏的 —— 只当补救，别当常规。
 
 ### 6. 唤醒 analyzer
 
