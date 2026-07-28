@@ -21,7 +21,7 @@
 ### 大循环（队列级，跨角色）
 
 ```
-[pending] → [dispatched] → [fix completed] → [待复验] → [待人验收] → [completed]
+[ready] → [dispatched] → [fix completed] → [待复验] → [待人验收] → [completed]
     ▲                                              │              │
     └──────────── 复验不过 / 人打回 ────────────────┴──────────────┘
                               回边
