@@ -30,6 +30,12 @@ A methodology for managing multi-platform app development with structured specs.
 
 **Stack:** Markdown specs + OpenClaw skills + Git worktrees + tmux
 
+### [Building a Data Analyst](./cases/data-analyst/) (Chinese only)
+
+Three generations of an AI data-analysis assistant, and why the first two produced confident wrong numbers. The fix wasn't a better prompt — it was an event registry, a single-source-of-truth metric layer, and three automated gates. Includes a 7-step build tutorial and a field guide to 14 real data pitfalls.
+
+**Stack:** Apache Doris + Python + Claude Code subagent + metric SSOT
+
 ## Tips
 
 Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
@@ -76,6 +82,12 @@ Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
 一套管理多端应用开发的方法论。用结构化 spec 管理任务，AI agent 解析 spec、锁定任务、执行代码变更、更新状态 —— 把 PRD 变成 MR。
 
 **技术栈：** Markdown specs + OpenClaw skills + Git worktrees + tmux
+
+### [构建一个数据分析师](./cases/data-analyst/)
+
+AI 数据分析助手的三代演进，以及前两代为什么会输出「很有说服力的错数字」。解法不是更好的 prompt —— 是埋点注册表、指标唯一实现层和三道自检闸。含七步构建教程和 14 个真实数据口径陷阱手册。
+
+**技术栈：** Apache Doris + Python + Claude Code subagent + 指标 SSOT
 
 ## 小技巧
 
