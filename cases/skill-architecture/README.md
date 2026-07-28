@@ -66,13 +66,15 @@ description 里加一个从句**，一对含糊的 skill 就变成了一个路�
 
 ## 八个 skill 的谱系
 
+原文全部收录在 **[skills/](./skills/)**，未删减。
+
 | 形态 | Skill | 结构 |
 |---|---|---|
-| **委托给另一个 AI CLI** | `codex`、`gemini` | `SKILL.md`（何时委托、怎么传上下文）+ `scripts/*.py`（调用、JSON 解析、会话恢复） |
-| **工程流程自动化** | `wt`、`weekly` | `SKILL.md`（策略）+ `scripts/*.sh`（确定性执行） |
-| **方法论纪律** | `decision-hygiene`、`dirty-data-governance` | 只有 `SKILL.md`，无脚本、无触发词 —— 它们改的是默认行为 |
-| **品味约束** | `taste-skill`（1206 行） | 一大坨 reference，由 brief inference 把门 |
-| **多角色编排** | [`fix-pipeline`](../fix-pipeline/) | `SKILL.md`（共享契约）+ `roles/*.md`（一角色一分支） |
+| **委托给另一个 AI CLI** | [`codex`](./skills/codex/)、[`gemini`](./skills/gemini/) | `SKILL.md`（何时委托、怎么传上下文）+ `scripts/*.py`（调用、JSON 解析、会话恢复） |
+| **工程流程自动化** | [`wt`](./skills/wt/)、[`weekly`](./skills/weekly/) | `SKILL.md`（策略）+ `scripts/*.sh`（确定性执行） |
+| **方法论纪律** | [`decision-hygiene`](./skills/decision-hygiene/)、[`dirty-data-governance`](./skills/dirty-data-governance/) | 只有 `SKILL.md`，无脚本、无触发词 —— 它们改的是默认行为 |
+| **品味约束** | `taste-skill`（1206 行，**来源存疑未收录**） | 一大坨 reference，由 brief inference 把门 |
+| **多角色编排** | [`fix-pipeline`](../fix-pipeline/skill/) | `SKILL.md`（共享契约）+ `roles/*.md`（一角色一分支） |
 
 注意这个相关性：**skill 越是关于判断，脚本就越少。** 两个方法论 skill 一行脚本都没有；
 两个 CLI 封装几乎全是脚本。
