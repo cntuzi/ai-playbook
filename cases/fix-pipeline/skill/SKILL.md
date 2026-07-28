@@ -14,7 +14,7 @@ description: >-
 - **队列是真源** —— `orca orchestration task` 是唯一机器真源。消息只是唤醒信号，丢了不影响正确性；队列丢了就全乱。
 - **桶** —— 隔离单元。一个桶 = 一组 touched-files 互不重叠的问题 + 一个 agent + 一个执行位置。桶数决定并发度，问题数不决定。
 - **三证链** —— 自证（修复 agent 说改完了）→ 他证（换一个只读 agent 复验）→ 人证（人在 Linear 验收）。少一环就是假绿灯。
-- **回边** —— 复验不过、人打回，问题回 `pending`。这条边让它成为循环而不是流水线。
+- **回边** —— 复验不过、人打回，问题重新入队等人领。这条边让它成为循环而不是流水线。
 
 跨 agent 通用：claude / codex / omp / gemini / grok 都能扮演任一角色。执行底座是 Orca orchestration。
 
@@ -39,21 +39,29 @@ orca orchestration task-list --brief --json   # 队列现状 = 你的 external m
 | **verifier** | 批量拉待验证 → 派他证 → 请人验收 → 回读关单 | `~/.agents/skills/fix-pipeline/roles/verifier.md` |
 | **watchdog** | 常驻角色存活检查 + 按队列重放 | `~/.agents/skills/fix-pipeline/roles/watchdog.md` |
 
-角色没指定时，从队列状态推断该干什么：有 `pending` 就是 analyzer 的活，有 ready 的验证任务就是 verifier 的活。
+角色没指定时，从 `task-list --ready` 推断该干什么：**`parent_id` 为空**的是待分桶的问题（analyzer 的活），**标题以 `verify ` 开头**的是待复验的桶（verifier 的活）。
 
 ## 状态映射
 
 | 生命周期 | `task.status` | Linear state | 谁写 |
 |---|---|---|---|
-| 入队 | `pending` | `Todo` | intake |
-| 已分桶已派活 | `dispatched` | `In Progress` | analyzer（`dispatch` 自动置） |
-| 修复完成待复验 | fix `completed`，verify 转 ready | `In Progress` | fixer（`worker_done` 自动置） |
-| 复验通过待人验收 | `blocked`（gate） | `In Review` | verifier |
-| 人验收通过 | `completed` | `Done` | 人拖卡 → verifier 回读 |
-| 人打回 | `failed` → 派生新 `pending` | `Todo` + 评论 | 人 → verifier 回读 |
-| 他证不过 | `failed` → 回 `pending` | `In Progress` + 评论 | verifier |
+| 入队 | `ready`（无依赖，建出来就是） | `Todo` | intake |
+| 已分桶已派活 | 问题 task → `dispatched` | `In Progress` | **analyzer 显式置**（否则下一轮重复领取） |
+| 修复完成待复验 | fix `completed`，verify 任务转 `ready` | `In Progress` | fixer（`worker_done` 自动置） |
+| 复验通过待人验收 | 问题 task → `blocked` | `In Review` | verifier（`gate-create` 自动置） |
+| 人验收通过 | `gate-resolve` 回 `ready` → **再显式置 `completed`** | `Done` | 人拖卡 → verifier 回读 |
+| 人打回 | verify task `failed` + 新建问题 task（`ready`） | `Todo` + 评论 | 人 → verifier 回读 |
+| 他证不过 | 同上 | `In Progress` + 评论 | verifier |
 
-`task.status` 只有这六个值：`pending / ready / dispatched / completed / failed / blocked`。业务态用结构表达，不用新状态：**「待验证」靠 `--deps`**（验证任务依赖修复任务，修复完成即自动可领），**「待验收」靠 `gate`**。
+`task.status` 只有这六个值：`pending / ready / dispatched / completed / failed / blocked`。
+
+**实测的状态语义（与直觉不同，照这个来）**：
+
+- 新建**无依赖**的 task → 直接是 **`ready`**，不经过 `pending`
+- **`pending` 的意思是「依赖未满足」**，不是「刚入队」。所以扫新问题要用 `--ready`，扫 `--status pending` 会永远拿到空
+- `gate-resolve` 只把 task 从 `blocked` 放回 **`ready`**，不会关单 —— 必须紧接一次 `task-update --status completed`，否则它会被 analyzer 当成新问题重新领走
+
+业务态用结构表达，不用新状态：**「待验证」靠 `--deps`**（验证任务依赖修复任务，修复完成即自动可领），**「待验收」靠 `gate`**。
 
 ## 真源纪律
 

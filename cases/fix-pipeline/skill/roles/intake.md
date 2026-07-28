@@ -14,7 +14,7 @@
 orca orchestration task-list --brief --json
 ```
 
-在 `pending` / `dispatched` / `blocked` 里找同一问题。命中就给已有的 Linear issue 补证据，不新建条目：
+在 `ready` / `dispatched` / `blocked` 三种状态里找同一问题（分别对应：还没分桶、修复中、待验收）。命中就给已有的 Linear issue 补证据，不新建条目：
 
 ```bash
 orca linear comment add <ISSUE> --body "补充复现：<新证据>" --json
@@ -65,7 +65,7 @@ orca orchestration send --to "@worktree:<wf-id>" --type status \
 
 ## 完成判据
 
-- 用户这轮提的每个问题都对应**恰好一个** `pending` task + 一个 Linear `Todo` issue
+- 用户这轮提的每个问题都对应**恰好一个** `ready` task（无依赖的 task 建出来就是 `ready`）+ 一个 Linear `Todo` issue
 - 两边互相记录了对方 id
 - 命中查重的问题走了补证据，没有新建
 - 缺证据的问题已回问用户，且没有入队

@@ -23,7 +23,7 @@ orca terminal send --terminal <handle> --enter --json \
 
 ### 3. 不补历史
 
-新起的角色靠队列自己找活：analyzer 看 `task-list --status pending`，verifier 看 `task-list --ready`。你只需要在 send 的文本里点明这一句，不用给它补历史上下文。
+新起的角色靠队列自己找活，两者都扫 `task-list --ready`，按字段分流：analyzer 取 `parent_id` 为空的，verifier 取标题以 `verify ` 开头的。你只需要在 send 的文本里点明这一句，不用给它补历史上下文。
 
 **队列是 external memory** —— 这就是常驻角色可以随时重启的原因。
 

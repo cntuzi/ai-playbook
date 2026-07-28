@@ -85,15 +85,34 @@ pending / ready / dispatched / completed / failed / blocked
 
 | 生命周期 | `task.status`（机器真源） | 看板 state | 谁写 |
 |---|---|---|---|
-| 入队 | `pending` | `Todo` | intake |
-| 已分桶已派活 | `dispatched` | `In Progress` | analyzer（`dispatch` 自动置） |
-| 修复完成待复验 | fix `completed`（**worker_done 自动置**），verify 转 ready | `In Progress` | fixer |
-| 复验通过待人验收 | `blocked`（gate） | **`In Review`** ← 需新建 | verifier |
-| 人验收通过 | `completed` | `Done` | **人拖卡** → verifier 回读 |
-| 人打回 | `failed` → 派生新 `pending` | `Todo` + 评论写原因 | **人** → verifier 回读 |
-| 机器复验不通过 | `failed` → 回 `pending` | `In Progress` + 评论留证据 | verifier |
+| 入队 | `ready`（无依赖，建出来就是） | `Todo` | intake |
+| 已分桶已派活 | 问题 task → `dispatched` | `In Progress` | **analyzer 显式置** |
+| 修复完成待复验 | fix `completed`（**worker_done 自动置**），verify 任务转 `ready` | `In Progress` | fixer |
+| 复验通过待人验收 | 问题 task → `blocked` | **`In Review`** ← 需新建 | verifier（`gate-create` 自动置） |
+| 人验收通过 | `gate-resolve` 回 `ready` → **再显式 `completed`** | `Done` | **人拖卡** → verifier 回读 |
+| 人打回 | verify task `failed` + 新建顶层问题 task（`ready`） | `Todo` + 评论写原因 | **人** → verifier 回读 |
+| 机器复验不通过 | 同上 | `In Progress` + 评论留证据 | verifier |
 
 **有效的 `worker_done`（带 `taskId` + `dispatchId`）会自动把 task 和 dispatch 置 `completed`。不要再手动 `task-update`** —— 手动更新只留给显式恢复/覆盖。
+
+### 实测的 status 语义（与直觉不同）
+
+- 新建**无依赖**的 task → 直接是 **`ready`**，不经过 `pending`
+- **`pending` = 「依赖未满足」**，不是「刚入队」。扫新问题必须用 `--ready`；扫 `--status pending` 永远拿到空
+- `gate-resolve` 只把 task 从 `blocked` 放回 **`ready`**，不关单
+
+因此 analyzer 和 verifier **都扫 `--ready`**，靠字段分流：
+
+| 角色 | 筛选条件 |
+|---|---|
+| analyzer | `parent_id` 为空（intake 建的问题 task） |
+| verifier | 标题以 `verify ` 开头（analyzer 建的验证任务） |
+
+由此产生三个连带约束，缺一条流水线就断：
+
+1. **analyzer 分完桶必须把问题 task 显式置 `dispatched`** —— 否则它还在 `--ready` 里，下一轮被重复分桶、重复派 worker。
+2. **verifier 打回时新建的重试 task 不能挂 `--parent`** —— 挂了 `parent_id` 非空，analyzer 的筛选会漏掉它，问题永久卡死在队列里。
+3. **`gate-resolve` 之后必须紧接 `task-update --status completed`** —— 停在 `ready` 且 `parent_id` 为空的 task 会被 analyzer 当成新问题重新领走。
 
 ### 三套状态存储的单向纪律
 
@@ -210,15 +229,21 @@ orca orchestration dispatch-show --task <task_id> --json
 
 ---
 
-## 八、待验证假设 ⚠️
+## 八、假设验证结果
 
-| 假设 | 状态 | 影响面 | 退路 |
-|---|---|---|---|
-| `task-list --ready` 严格按 `deps` 满足过滤 | **仍需实测**。官方称它是 coordinator 的 external memory，但未明确 deps 语义 | 整个「待验证」态压在这条上 | 拉全量 task 在客户端算 deps |
-| `@worktree:<id>` 组地址跨终端重建仍可寻址 | 已文档化，**行为未实测** | intake / watchdog 是否需要维护 handle 表 | 维护 handle 注册表 |
-| `gate-create` 是否把 task 精确置为 `blocked` | 未确认（官方只说 "blocking a task"） | 状态映射表的一行 | 用 `gate-list` 而非 task.status 作为待验收清单 |
+用一次性探针 task 实测（探针已清理，队列无残留）。
 
-**已由官方文档解答（原为待验证）**：`check --unread --inject` 只为**运行它的那个终端**渲染邮件，**不能远程唤醒别的终端**。送 tracked task 用 `dispatch --inject`，给已有 agent 自由 prompt 用 `terminal send`。因此常驻角色的循环是它自己跑 rolling `check --wait`，不是被别人推醒。
+| 假设 | 结果 |
+|---|---|
+| `task-list --ready` 严格按 `deps` 满足过滤 | ✅ **成立**。deps 未满足的 task 不出现；base 置 `completed` 后立刻出现 |
+| `gate-create` 把 task 置为 `blocked` | ✅ **成立**。`ready` → `blocked` |
+| `gate-resolve` 之后 task 的状态 | ⚠️ **回 `ready`，不关单**。必须紧接一次 `task-update --status completed` |
+| 新建无依赖 task 的初始状态 | ⚠️ **是 `ready` 不是 `pending`**。`pending` = 依赖未满足 |
+| `@worktree:<id>` 组地址跨终端重建仍可寻址 | ⏸ **未测**。探针在非 Orca worktree 下跑，取不到 worktree id |
+
+**这次测试的价值**：`pending` 语义那条推翻了设计里的一行，而且是致命的 —— skill 里 analyzer 第一步原本写的是 `task-list --status pending`，照着跑会**永远拿到空列表，整条流水线一动不动**。连带暴露另外两个断点（问题 task 分桶后不出队会被重复领取；打回时挂 `--parent` 会让重试 task 永久卡死）。三处都已修，见第四节。
+
+**由官方文档解答（原为待验证）**：`check --unread --inject` 只为**运行它的那个终端**渲染邮件，**不能远程唤醒别的终端**。送 tracked task 用 `dispatch --inject`，给已有 agent 自由 prompt 用 `terminal send`。因此常驻角色的循环是它自己跑 rolling `check --wait`，不是被别人推醒。
 
 ---
 
