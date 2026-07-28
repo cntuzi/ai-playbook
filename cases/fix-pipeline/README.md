@@ -1,98 +1,78 @@
-# Fix Pipeline — a queue-driven, multi-agent bug-fixing loop
+# Fix Pipeline —— 队列驱动的多 Agent 修复闭环
 
-[中文](./README.zh-CN.md)
+一批问题进去，修好的出来。每个修复都由**另一个** agent 独立复验过，再由人在看板上验收。
 
-A batch of bugs goes in. Fixes come out the other end, each one independently verified by a
-*different* agent and accepted by a human on a Kanban board.
+**技术栈：** Orca orchestration（任务队列、dispatch、decision gate）+ 任意 TUI 编码 agent
+（Claude Code / Codex / omp / Gemini）+ Linear 作为人的验收看板。
 
-**Stack:** Orca orchestration (task queue, dispatch, decision gates) + any TUI coding agent
-(Claude Code / Codex / omp / Gemini) + Linear as the human acceptance board.
-
-> **Status:** design complete, minimum viable loop not yet run. Assumptions that are still
-> unverified are marked as such in [design.md](./design.md) — this repo documents working
-> systems, and this one is honest about which parts have not been proven yet.
+> **状态：** 设计完成，最小闭环尚未跑通。仍未验证的假设在 [design.md](./design.md)
+> 里明确标注 —— 这个仓库记录跑得起来的系统，所以也如实说明哪些部分还没被证明。
 
 ---
 
-## The problem
+## 问题在哪
 
-Throw ten bugs at an agent and you get ten plausible-looking fixes. Some of them are real.
-Some fix a symptom. Some were never bugs — the agent hallucinated the problem. And the agent
-that wrote the fix is the same one telling you it works.
+把十个 bug 丢给一个 agent，你会拿到十个看起来都挺像回事的修复。有些是真的。有些只治了症状。
+有些压根不是 bug —— agent 自己幻觉出来的。而告诉你"修好了"的，正是写这个修复的同一个 agent。
 
-Scaling that up doesn't need more parallelism. It needs a structure where **"done" has to be
-earned three times**.
+规模化这件事需要的不是更多并行，而是一个让**「完成」必须被挣三次**的结构。
 
-## Four ideas hold it together
+## 四个概念撑起全部
 
-**The queue is the source of truth.** Every problem is a row in an orchestration task queue.
-Messages between agents are only wake-up signals — lose one and nothing breaks, because any
-agent can recover its work list from the queue. Lose the queue and everything breaks. This is
-what makes resident agents restartable at any moment.
+**队列是真源。** 每个问题是编排任务队列里的一行。agent 之间的消息只是唤醒信号 —— 丢一条不影响
+正确性，因为任何 agent 都能从队列里恢复自己该干的活。队列丢了才是全盘皆输。这就是常驻 agent
+能随时重启的原因。
 
-**Buckets, not tickets, set the concurrency.** A bucket is a set of problems whose touched
-files don't overlap, handled by one agent in one place. Bucket count sets parallelism; problem
-count does not. Clustering by *touched files* rather than by problem category (crash / UI /
-perf) is what makes parallel merges conflict-free — category has nothing to do with merge
-conflicts, and is used instead to pick which model to dispatch.
+**决定并发度的是桶，不是问题数。** 一个桶 = 一组 touched-files 互不重叠的问题，交给一个 agent
+在一个位置处理。按**碰哪些文件**聚类而不是按问题类别（崩溃 / UI / 性能）聚类，是并行合并零冲突的
+前提 —— 类别跟 merge 冲突毫无关系，它另有用途：决定派哪个模型。
 
-**The three-proof chain.** Self-proof (the fixing agent says it's done) → peer-proof (a
-*different*, read-only agent re-verifies) → human-proof (a person accepts on the board). Drop
-any link and you get a green light that means nothing. Peer-proof must be a different agent:
-an agent verifying its own work is not verification.
+**三证链。** 自证（修复 agent 说改完了）→ 他证（**另一个**只读 agent 复验）→ 人证（人在看板上
+验收）。少一环，绿灯就没有意义。他证必须换 agent：一个 agent 验自己的活，不叫验证。
 
-**The back edge.** Failed peer-proof and human rejection both send the problem back to
-`pending`. That edge is what makes this a loop rather than a pipeline.
+**回边。** 他证不过、人打回，问题都回到 `pending`。这条边让它是循环，不是流水线。
 
-## Shape
+## 形状
 
 ```
-intake ──▶ [queue] ──▶ analyzer ──▶ buckets ──▶ fixer ──▶ peer-proof ──▶ gate ──▶ human
-              ▲                                                                     │
-              └───────────── rejected: back to pending ◀────────────────────────────┘
+intake ──▶ [队列] ──▶ analyzer ──▶ 桶 ──▶ fixer ──▶ 他证 ──▶ gate ──▶ 人
+             ▲                                                        │
+             └──────────── 打回：回 pending ◀─────────────────────────┘
 ```
 
-Five roles, each a plain TUI agent session reading one role file:
+五个角色，每个都是一个普通 TUI agent 会话，只读它自己那份角色文件：
 
-| Role | Does | Lives |
+| 角色 | 干什么 | 存在形式 |
 |---|---|---|
-| **intake** | takes problem reports, normalizes, de-dupes, writes the queue | resident (it's the human interface) |
-| **analyzer** | clusters by touched files into buckets, builds the task chain, dispatches | resident |
-| **fixer** | fixes one bucket serially, runs the self-proof loop | per bucket, reusable |
-| **verifier** | pulls ready verification tasks, spawns peer-proof, asks for human acceptance | resident |
-| **watchdog** | restarts dead resident roles; they recover work from the queue | scheduled automation |
+| **intake** | 接问题、归一化、去重、写队列 | 常驻（它就是人机界面） |
+| **analyzer** | 按 touched-files 分桶、建任务链、派活 | 常驻 |
+| **fixer** | 串行修一个桶，跑自证小循环 | 每桶一个，可复用 |
+| **verifier** | 拉待验证任务、派他证、请人验收 | 常驻 |
+| **watchdog** | 重启掉线的常驻角色，它们自己从队列找回活 | 定时 automation |
 
-## Why the state model looks the way it does
+## 状态模型为什么长这样
 
-The orchestration layer has exactly six task statuses and they can't be extended:
-`pending / ready / dispatched / completed / failed / blocked`. Two business states —
-"awaiting verification" and "awaiting human acceptance" — have nowhere to live.
+编排层的任务状态**只有六个且不可扩展**：`pending / ready / dispatched / completed / failed /
+blocked`。而「待验证」和「待验收」两个业务态无处安放。
 
-Rather than bolt on a parallel status store, both are expressed structurally:
+与其另建一套并行状态存储，两者都用**结构**表达：
 
-- **awaiting verification** → a verification task that `--deps` on the fix task. When the fix
-  completes, the verification task becomes claimable on its own.
-- **awaiting acceptance** → a decision gate blocking the parent task. The gate list *is* the
-  acceptance queue.
+- **待验证** → 一个 `--deps` 依赖修复任务的验证任务。修复完成，它自动变成可独立领取。
+- **待验收** → 一个卡住父任务的 decision gate。gate 列表**本身**就是待验收队列。
 
-This turned out cleaner than custom states would have been, and both are patterns the
-orchestration layer already uses natively.
+结果比自定义状态更干净，而且这两种都是编排层原生在用的模式。
 
-## Contents
+## 内容
 
-- **[design.md](./design.md)** — full design: state mapping, seven operating rules, the
-  rejected-alternatives table, unverified assumptions, known risks
-- **[skill/](./skill/)** — the actual skill, portable across agents: shared contract plus one
-  file per role *(Chinese)*
+- **[design.md](./design.md)** —— 完整设计：状态映射、七条纪律、
+  **已否决方案及理由**、待验证假设、已知风险
+- **[skill/](./skill/)** —— 可跨 agent 使用的 skill 实物：共享契约 + 每角色一个文件
 
-## Notes for adapting this
+## 迁移到别处时注意
 
-Linear is used as the human board because the orchestration layer has no per-problem UI — its
-task and gate lists are CLI-only. Any board with a programmable API works; what matters is
-that exactly one store is authoritative for machines and the board is a **projection** with a
-single human-writable field (accept / reject). Bidirectional sync between two state stores is
-how you get drift.
+选 Linear 当人的看板，是因为编排层没有问题粒度的 UI —— 它的 task 和 gate 列表只有 CLI。
+任何有可编程 API 的看板都行；关键是**只有一套存储对机器权威**，看板是**投影**，且人只有一个
+可写字段（通过 / 打回）。两套状态存储双向同步，就是漂移的来源。
 
-The bundled orchestration guide (`orca skills get orchestration`) is the source of truth for
-primitives. This case documents the workflow layer on top and deliberately does not restate
-command syntax, so it can't drift out of sync with the CLI version you're running.
+原语的真源是官方 guide（`orca skills get orchestration`）。这个案例只记录它之上的工作流层，
+刻意不复述命令语法 —— 这样它不会跟你手上那个 CLI 版本漂移。

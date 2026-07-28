@@ -30,22 +30,13 @@ A methodology for managing multi-platform app development with structured specs.
 
 **Stack:** Markdown specs + OpenClaw skills + Git worktrees + tmux
 
-### [Fix Pipeline](./cases/fix-pipeline/)
+### [Fix Pipeline](./cases/fix-pipeline/) *(Chinese only)*
 
-A queue-driven multi-agent loop for batch bug fixing. Every fix is verified by a *different*
-agent than the one that wrote it, then accepted by a human on a Kanban board — three proofs
-before anything closes. Includes the rejected-alternatives table and the assumptions still
-unverified.
+A queue-driven multi-agent loop for batch bug fixing — three proofs before anything closes.
 
-**Stack:** Orca orchestration + any TUI coding agent (Claude Code / Codex / omp / Gemini) + Linear
+### [Skill Architecture](./cases/skill-architecture/) *(Chinese only)*
 
-### [Skill Architecture](./cases/skill-architecture/)
-
-Five principles distilled from eight hand-written agent skills — derived after the fact from
-artifacts written months apart, not from a style guide. Three of them were independently
-rediscovered in unrelated skills.
-
-**Stack:** Agent skills (SKILL.md + scripts)
+Five principles distilled from eight hand-written agent skills.
 
 ## Tips
 
@@ -94,14 +85,14 @@ Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
 
 **技术栈：** Markdown specs + OpenClaw skills + Git worktrees + tmux
 
-### [Fix Pipeline —— 队列驱动的多 Agent 修复闭环](./cases/fix-pipeline/README.zh-CN.md)
+### [Fix Pipeline —— 队列驱动的多 Agent 修复闭环](./cases/fix-pipeline/)
 
 批量修问题的闭环。每个修复都由**另一个** agent 复验（不是写它的那个），再由人在看板上验收 ——
 关单之前要挣三次「完成」。含**已否决方案及理由**表和仍未验证的假设。
 
 **技术栈：** Orca orchestration + 任意 TUI 编码 agent（Claude Code / Codex / omp / Gemini）+ Linear
 
-### [Skill 架构 —— 五条原则](./cases/skill-architecture/README.zh-CN.md)
+### [Skill 架构 —— 五条原则](./cases/skill-architecture/)
 
 从八个手写 agent skill 里抽出的五条原则 —— 事后从产物里抽的，不是先立规范。其中三条是在毫无
 关系的 skill 里被独立重复发现的。

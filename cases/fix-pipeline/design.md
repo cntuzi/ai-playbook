@@ -1,237 +1,196 @@
-# Fix Pipeline — design
+# Fix Pipeline 设计
 
-[中文](./design.zh-CN.md) · [back to case](./README.md)
+[返回案例](./README.md)
 
-> Depends on: Orca CLI v1.4.159 + one Linear team (written `<TEAM>` below)
-> Primitives are documented by `orca skills get orchestration`. This file covers the workflow
-> layer only and deliberately does not restate command syntax.
-> Assumptions marked ⚠️ **unverified** must not be treated as fact.
+> 依赖：Orca CLI v1.4.159 + 一个 Linear team（下文记作 `<TEAM>`）
+> 原语真源：`orca skills get orchestration`。本文只写工作流层，不复述原语用法。
+> 标注「⚠️ 未验证」的假设不得当作事实使用。
 
 ---
 
-## 1. Two nested loops
+## 一、两层循环
 
-### Inner loop (inside one agent)
-
-```
-fix ──→ self-check ──→ fix ──→ self-check ...  until self-check passes
-```
-
-Invisible from outside. The only thing that escapes is one terminal signal: `worker_done`.
-
-### Outer loop (across roles, driven by the queue)
+### 小循环（单元级，agent 内部）
 
 ```
-[pending] → [dispatched] → [fix completed] → [awaiting peer] → [awaiting human] → [completed]
-    ▲                                              │                  │
-    └────────── peer-proof failed / human rejected ─┴──────────────────┘
-                            back edge
+改 ──→ 自验 ──→ 改 ──→ 自验 ...  直到自验通过
 ```
 
-**Outer ≠ inner + acceptance.** They nest: the inner loop *is* the implementation of the
-`dispatched → fix completed` segment.
+活在**单个修复 agent 内部**，外部不可见。对外只暴露一个终态信号 `worker_done`。
 
-### The three-proof chain
+### 大循环（队列级，跨角色）
 
-| Layer | Who proves | What it establishes |
+```
+[pending] → [dispatched] → [fix completed] → [待复验] → [待人验收] → [completed]
+    ▲                                              │              │
+    └──────────── 复验不过 / 人打回 ────────────────┴──────────────┘
+                              回边
+```
+
+**大循环 ≠ 小循环 + 验收。** 两者是嵌套关系：小循环是 `dispatched → fix completed` 这一段的内部实现。
+
+### 三证链
+
+| 层 | 谁证 | 能证明什么 |
 |---|---|---|
-| **Self-proof** | the fixing agent | "I changed what I understood the problem to be" |
-| **Peer-proof** | an independent read-only agent | "a different agent confirms it's fixed with no regression" |
-| **Human-proof** | a person on the board | "this is what I wanted" — the only authority that closes |
+| **自证** | 修复 agent（小循环内） | 「按我的理解改完了」 |
+| **他证** | verifier 派的独立只读 agent | 「换个 agent 看，确实修好了、没引入回归」 |
+| **人证** | 人在看板上验收 | 「这就是我要的」——唯一有权关单 |
 
-Skip the layering and you get an agent lighting its own green light.
-
----
-
-## 2. Roles
-
-| Role | Form | Does | Loop driver |
-|---|---|---|---|
-| **intake** | resident TUI session | takes reports → normalizes → de-dupes → writes queue | human typing |
-| **analyzer** | resident TUI agent (control plane) | clusters into buckets → builds tasks → spawns & dispatches | rolling `check --wait` + `task-list --ready` |
-| **fixer** | TUI agent per bucket, reusable | fixes the bucket serially, runs the inner loop | woken by `dispatch --inject` |
-| **verifier** | resident TUI agent (control plane) | pulls ready verifications → spawns peer-proof → requests acceptance | rolling `check --wait` + `task-list --ready` |
-| **watchdog** | scheduled automation | liveness check on resident roles, rebuilds them | cron |
-
-intake is a resident TUI rather than a programmatic listener because **it is the window the
-human types into**. That residency is the inherent cost of a human interface, not an agent
-burning context while waiting on IO.
+不分层就会出现「agent 自己点绿灯」的假通过。
 
 ---
 
-## 3. Data model
+## 二、角色
 
-| Concept | Carrier | Granularity | Role |
+| 角色 | 形态 | 职责 | 循环驱动 |
 |---|---|---|---|
-| **Problem** | orchestration task (parent) | one problem | **sole machine source of truth** |
-| Fix task | orchestration task (`--parent`) | one bucket | machine |
-| Verify task | orchestration task (`--deps=[fix]`) | one bucket | machine |
-| **Bucket** | one isolated execution site | file-adjacent problems | isolation unit |
-| **Human-facing problem** | board issue | one problem | projection + sole human input point |
+| **intake** | 常驻 TUI 会话 | 接问题输入 → 归一化去重 → 写队列 | 人在终端里敲字 |
+| **analyzer** | 常驻 TUI agent（控制面 worktree） | 按 touched-files 分桶 → 建任务 → 起 worker 派活 | rolling `check --wait` + `task-list --ready` |
+| **fixer** | TUI agent（桶专属位置），可复用 | 桶内串行修复，跑小循环 | 被 `dispatch --inject` 唤起 |
+| **verifier** | 常驻 TUI agent（控制面 worktree） | 拉待验证任务 → 派他证 → 请人验收 → 回读关单 | rolling `check --wait` + `task-list --ready` |
+| **watchdog** | 定时 automation | 常驻角色存活检查，掉了重建 | cron |
 
-Dependency depth stays at 2–3, within the official "no deeper than 3–4" guidance.
+intake 之所以是常驻 TUI 而非程序化监听器：**它是用户坐在前面敲字的那个窗口**，常驻成本是人机界面的固有成本，不是「agent 烧 context 等 IO」。
 
-### The constraint that shapes everything
+---
 
-Task status has exactly six values and cannot be extended:
+## 三、数据模型
+
+| 概念 | 载体 | 粒度 | 角色 |
+|---|---|---|---|
+| **问题** | orchestration task（parent） | 单个问题 | **机器唯一真源** |
+| 修复任务 | orchestration task（`--parent`） | 单个桶 | 机器 |
+| 验证任务 | orchestration task（`--deps=[fix]`） | 单个桶 | 机器 |
+| **桶** | 一个隔离的执行位置（worktree 或独立终端） | 一组文件邻接的问题 | 执行隔离单元 |
+| **人看的问题** | 看板 issue | 单个问题 | 人看的投影 + 唯一人工输入点 |
+
+依赖链深度 2–3 层，符合官方「不要深于 3–4 层」的建议。
+
+### 关键约束：status 固定六值
 
 ```
 pending / ready / dispatched / completed / failed / blocked
 ```
 
-"Awaiting verification" and "awaiting acceptance" have nowhere to live. Both are expressed
-structurally instead — and both are patterns the orchestration layer already uses natively:
+「待验证」「待验收」没法直接建模。绕法（都是官方原生模式）：
 
-- **awaiting verification → dependency.** The verify task `--deps` on the fix task; when the
-  fix completes it becomes independently claimable, and `task-list --ready` *is* the work list.
-- **awaiting acceptance → gate.** `gate-create` blocks the parent task. Gates are meant for
-  coordinator-managed DAG decisions, and human acceptance is exactly that.
-  (The reverse direction — a worker needing an answer — uses `ask`, which raises a
-  `decision_gate` message the coordinator answers with `reply`. Don't mix the two paths.)
+- **「待验证」→ 依赖表达**：验证任务 `--deps=[修复任务]`，修复 `completed` 后自动可领，`task-list --ready` 就是待领集合。
+- **「待验收」→ gate 表达**：`gate-create` 卡住 parent task。官方明确 `gate-create` 用于 coordinator 管理的 DAG 决策 —— 人工验收正是这类决策。
+  （worker 反过来要问 coordinator 用 `ask`，产生 `decision_gate` 消息，coordinator 用 `reply` 回答。两条路不要混。）
 
 ---
 
-## 4. State mapping and source-of-truth discipline
+## 四、状态映射与真源纪律
 
-| Lifecycle | `task.status` (machine truth) | Board state | Written by |
+| 生命周期 | `task.status`（机器真源） | 看板 state | 谁写 |
 |---|---|---|---|
-| queued | `pending` | `Todo` | intake |
-| bucketed & dispatched | `dispatched` | `In Progress` | analyzer (set by `dispatch`) |
-| fixed, awaiting peer | fix `completed` (**set automatically by `worker_done`**), verify becomes ready | `In Progress` | fixer |
-| peer-proof passed, awaiting human | `blocked` (gate) | **`In Review`** ← must be created | verifier |
-| accepted | `completed` | `Done` | **human drags card** → verifier reads back |
-| rejected | `failed` → new `pending` | `Todo` + comment | **human** → verifier reads back |
-| peer-proof failed | `failed` → back to `pending` | `In Progress` + evidence comment | verifier |
+| 入队 | `pending` | `Todo` | intake |
+| 已分桶已派活 | `dispatched` | `In Progress` | analyzer（`dispatch` 自动置） |
+| 修复完成待复验 | fix `completed`（**worker_done 自动置**），verify 转 ready | `In Progress` | fixer |
+| 复验通过待人验收 | `blocked`（gate） | **`In Review`** ← 需新建 | verifier |
+| 人验收通过 | `completed` | `Done` | **人拖卡** → verifier 回读 |
+| 人打回 | `failed` → 派生新 `pending` | `Todo` + 评论写原因 | **人** → verifier 回读 |
+| 机器复验不通过 | `failed` → 回 `pending` | `In Progress` + 评论留证据 | verifier |
 
-A valid `worker_done` carrying `taskId` + `dispatchId` **marks the task and dispatch completed
-automatically**. Don't follow it with a manual `task-update` — reserve those for explicit
-recovery or override.
+**有效的 `worker_done`（带 `taskId` + `dispatchId`）会自动把 task 和 dispatch 置 `completed`。不要再手动 `task-update`** —— 手动更新只留给显式恢复/覆盖。
 
-### Three state stores, one direction
+### 三套状态存储的单向纪律
 
-- orchestration `task.status` = **sole machine truth**; every scheduling decision reads only this
-- board issue state = **human projection + the only human input point**; humans write exactly
-  one thing: accept or reject
-- the worktree's `workspaceStatus` = **bucket-level progress projection, display only** — no
-  automation may read it to decide anything
+- orchestration `task.status` = **唯一机器真源**，所有调度决策只信它
+- 看板 issue state = **人看的投影 + 唯一人工输入点**，人只写「验收通过 / 打回」
+- worktree 的 `workspaceStatus` = **桶级进度投影，纯展示，任何决策都不许读它**
 
 ```
-task ──push progress──▶ board
-task ◀──read back acceptance only── board
-task ──push bucket progress──▶ workspaceStatus (write-only)
+task ──推进度──▶ 看板
+task ◀──仅回读验收结论── 看板
+task ──推桶级进度──▶ workspaceStatus（只写不读）
 ```
 
-This rule exists because of a real incident: a board status was changed and the orchestration
-card never moved, because they are two independent stores with no linkage. Without a pinned
-direction, that single failure repeats once per problem.
+**背景**：踩过「改了看板，编排层卡片状态没动」的坑（两套独立存储不联动）。不写死方向，同一个坑会按问题数量放大。
 
-### Reading back human acceptance
+### 回读
 
 ```bash
 orca linear list-issues --team <TEAM> --state Done --updated-at 1h --json
 ```
 
-`--updated-at` takes a duration, so this is an incremental scan rather than a full pull.
+`--updated-at` 接 duration，增量扫描，不用全量拉。
 
 ---
 
-## 5. How to actually dispatch work
+## 五、正确的派活姿势
 
-`worktree create --agent --prompt` **does not attach** `taskId` / `dispatchId`. A worker
-launched that way has no lifecycle authority and cannot emit a valid `worker_done` — you have
-silently opted out of orchestration provenance.
+`worktree create --agent --prompt` 那条路**不挂** `taskId` / `dispatchId`，worker 没有 lifecycle 权限，发不出有效 `worker_done`，等于放弃编排 provenance。
 
-The correct four steps:
+正确的四步：
 
 ```bash
-# 1. Spawn the worker. Create a worktree only when parallel buckets would mutate one checkout.
+# 1. 起 worker（仅当多桶并行改同一 checkout 才建 worktree）
 orca worktree create --name <bucket> --agent codex --no-parent --json
-#    worker handle = startupTerminal.handle from the response
+#    worker handle = 响应里的 startupTerminal.handle
 
-# 2. Wait for TUI readiness, or the prompt gets swallowed
+# 2. 等 TUI 就绪，否则 prompt 被吞
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
 
-# 3. Create the task
-orca orchestration task-create --spec "<bucket problem list + acceptance criteria>" \
-  --parent <problem_task> --json
+# 3. 建任务
+orca orchestration task-create --spec "<桶内问题清单 + 验收标准>" --parent <problem_task> --json
 
-# 4. Dispatch with preamble injection — this is the step that confers lifecycle authority
+# 4. 注入 preamble 派活 —— 这一步才产生 lifecycle 权限
 orca orchestration dispatch --task <task_id> --to <handle> --inject --json
 ```
 
-For a single bucket with no parallel mutation of the same checkout, a fresh terminal in the
-existing worktree is enough.
+单桶、且不与他人并行改同一 checkout 时，同 worktree 起新终端即可。
 
-**Workers are reusable.** After sending `worker_done` a worker ends its turn and idles; a new
-`dispatch --inject` wakes it again.
+**worker 可复用**：发完 `worker_done` 回到 idle，用新的 `dispatch --inject` 再唤起。
 
 ---
 
-## 6. Seven operating rules
+## 六、七条纪律
 
-### 1. A resident agent is a router, not a worker
+### 1. 常驻 agent 是路由器，不是工人
 
-It touches task ids, titles, file lists and report *paths* only. Anything that requires reading
-content gets delegated to a throwaway sub-agent. Per-round context growth then stays constant
-rather than kilobyte-scale. **Break this rule and the resident design dies within two days.**
+只碰 task id、标题、文件清单、report 路径；读内容的活一律派一次性子 agent。每轮 context 增量是常数级而非 KB 级。**这条破了，常驻方案两天内撑爆。**
 
-### 2. Reports go to disk; messages carry paths
+### 2. 报告写盘，只传路径
 
-`worker_done` supports `reportPath` in its payload. Body text lands in a file; the message
-carries the path. This is the mechanism that makes rule 1 enforceable.
+`worker_done` 的 payload 支持 `reportPath`。正文落文件，消息只带路径。纪律 1 靠它落地。
 
-### 3. Peer-proof uses a different agent, read-only
+### 3. 他证换 agent 且只读
 
-The verifying agent must not be the fixing agent, and must be read-only. Varying the *lens*
-(does it still reproduce / any regression / did it fix the right place) beats spawning N
-identical verifiers.
+复验 agent 必须与修复 agent 不同，且只读。换视角（能否复现 / 是否引入回归 / 是否改错了地方）比派 N 个同质复验有效。
 
-### 4. The queue is external memory; messages are only wake-ups
+### 4. 队列是 external memory，消息只是唤醒信号
 
-- Lifecycle authority comes from `taskId` + `dispatchId` in the payload, **not the terminal
-  handle** — a pane gets a new handle after restart, so never decide provenance by comparing
-  handles.
-- `worker_done` / `heartbeat` must be sent **from the worker's own terminal** to the **concrete
-  coordinator handle in the live preamble**. Broadcast progress with the `status` type instead.
-- A coordinator restart therefore strands in-flight `worker_done` messages. **The fallback is
-  `task-list --ready`** — the official guidance calls it the coordinator's external memory.
-- `check --wait` **returns one message at a time**. If N workers may finish together, loop N
-  times and dispatch newly-ready tasks after each.
-- A `check --wait` timeout or `{count:0}` is a **checkpoint, not a failure**. Real coding tasks
-  run 15–60 minutes; heartbeats and terminal activity prove liveness, not completion.
+- lifecycle 权限来自 payload 的 `taskId` + `dispatchId`，**不是 terminal handle** —— pane 重启就换 handle，永远不要靠比对 handle 判断归属。
+- `worker_done` / `heartbeat` 必须**从 worker 自己的终端**发、发给 **preamble 里的具体 coordinator handle**。广播进度用 `status` 类型。
+- coordinator 重启会让在途 `worker_done` 落空。**兜底是 `task-list --ready`** —— 官方就把它称为 coordinator 的 external memory。
+- `check --wait` **一次只返回一条消息**。N 个 worker 同时完成就循环 N 次。
+- `check --wait` 超时或 `{count:0}` 是**检查点，不是失败**。真实编码任务 15–60 分钟；heartbeat 只证明活着。
 
-### 5. Buckets cluster by touched files
+### 5. 桶按 touched-files 聚类
 
-- No file overlap between buckets → conflict-free parallel merges
-- Serial edits within a bucket → the agent sees the whole module context
-- Worktree count equals **bucket** count, not problem count
+- 桶间文件不重叠 → 并行 merge 零冲突
+- 桶内同模块串行改 → agent 拿到完整上下文
+- worktree 数 = **桶数**，不是问题数
 
-**State the justification for each worktree.** Official guidance is that parallelism,
-convenience, and task independence are *not* isolation requirements — only a concrete checkout
-or filesystem conflict is. Here the justification is concrete: **parallel buckets mutating one
-checkout collide on the git index and build artifacts.**
+**worktree 的正当性要明说**：官方立场是「并行执行、方便、任务独立都不构成隔离需求，只有真实的 checkout / 文件系统冲突才算」。本设计的正当理由是：**多个桶并行修改同一 checkout 会撞 git index 和构建产物，这是真实冲突**。
 
-Problem category isn't wasted — it decides **who gets dispatched**: crashes and concurrency to
-a strong model, copy and constants to a cheap one.
+分类信息不浪费，它决定**派谁**：崩溃类给强模型，文案类给便宜模型。
 
-### 6. `workspaceStatus` is display only
+### 6. `workspaceStatus` 纯展示
 
-Automation that reads it to make a decision has promoted a display layer to a source of truth.
+自动化逻辑读它做判断，等于把展示层当真源。
 
-### 7. Filter false positives at the door
+### 7. 假阳性在入口卡
 
-A meaningful share of fan-out bug hunting is hallucination or not worth fixing. Every false
-positive that gets through burns one fixing agent, one peer-proof, and one human acceptance.
-**One extra round of judgement at intake is cheaper than three wasted rounds downstream.**
+扇出找问题的产出里相当比例是幻觉或不值得改。每个假问题穿过入口就要烧一个修复 agent + 一次他证 + 一次人工验收。**入口多花一轮判断，比下游三次浪费便宜。**
 
-### Tool boundary
+### 附：工具边界
 
-Orchestration state must be created through `task-create` + `dispatch --inject` (or
-`orchestration run`). An agent's built-in sub-agent tools, generic spawn APIs, and chat-style
-parallel workers can do the work, but they produce no task/dispatch provenance, inject no
-lifecycle preamble, carry no `worker_done` authority, and have no decision gates.
+用编排就必须用 `task-create` + `dispatch --inject`（或 `orchestration run`）建运行时状态。各 agent 自带的 subagent 工具、通用 spawn API、聊天式并行 worker **替代不了** —— 不产生 task/dispatch provenance、不注入 lifecycle preamble、没有 `worker_done` 权限、没有 decision gate。
 
-Verify before claiming something was orchestrated:
+声称「已编排」之前先验：
 
 ```bash
 orca orchestration task-list --json
@@ -240,103 +199,86 @@ orca orchestration dispatch-show --task <task_id> --json
 
 ---
 
-## 7. Prerequisites
+## 七、落地前置条件
 
-1. **Enable orchestration** — Settings > Experimental. It's an experimental feature; without it
-   every `orchestration` command is unavailable.
-2. **Add an `In Review` state to the board**, between `In Progress` and `Done`. Linear's
-   defaults are `Backlog / Todo / In Progress / Done / Canceled / Duplicate`, which has no
-   "machine-verified, awaiting human" state — and using `Done` for it pollutes the meaning of
-   Done. ⚠️ The CLI can only read workflow states; **creating one is UI-only** — the single
-   action in this whole design that cannot be scripted.
-3. **A control-plane worktree** holding only orchestration scripts and a report directory.
-4. **A watchdog automation** with `--workspace-mode existing --fresh-session`.
-5. **A label taxonomy** on board issues, so analyzer can pick models.
+1. **启用 orchestration**：Settings > Experimental（实验特性，不开则所有 `orchestration` 命令不可用）。
+2. **看板加 `In Review` 状态**（`In Progress` 与 `Done` 之间）。Linear 默认六态是 `Backlog / Todo / In Progress / Done / Canceled / Duplicate`，缺「机器复验通过、等人验收」这一态；用 `Done` 表示待验收会污染 Done 的语义。
+   ⚠️ CLI 只能读工作流状态，**建状态只能在看板 UI 手动做** —— 全套设计里唯一 CLI 干不了的动作。
+3. **建控制面 worktree**，只放编排脚本和报告目录，不放业务代码。
+4. **建 watchdog automation**，`--workspace-mode existing --fresh-session`。
+5. **定义分类标签集**（打在 issue 上，供 analyzer 选模型）。
 
 ---
 
-## 8. Unverified assumptions ⚠️
+## 八、待验证假设 ⚠️
 
-| Assumption | Status | Blast radius | Fallback |
+| 假设 | 状态 | 影响面 | 退路 |
 |---|---|---|---|
-| `task-list --ready` filters strictly on satisfied `deps` | **untested.** Officially described as coordinator external memory, but deps semantics aren't spelled out | the entire "awaiting verification" state rests on it | pull all tasks and compute deps client-side |
-| `@worktree:<id>` group addressing survives terminal recreation | documented, **behaviour untested** | whether intake/watchdog need a handle registry | maintain a handle registry |
-| `gate-create` sets the task to exactly `blocked` | unconfirmed (docs only say "blocking a task") | one row of the state map | treat `gate-list` rather than `task.status` as the acceptance queue |
+| `task-list --ready` 严格按 `deps` 满足过滤 | **仍需实测**。官方称它是 coordinator 的 external memory，但未明确 deps 语义 | 整个「待验证」态压在这条上 | 拉全量 task 在客户端算 deps |
+| `@worktree:<id>` 组地址跨终端重建仍可寻址 | 已文档化，**行为未实测** | intake / watchdog 是否需要维护 handle 表 | 维护 handle 注册表 |
+| `gate-create` 是否把 task 精确置为 `blocked` | 未确认（官方只说 "blocking a task"） | 状态映射表的一行 | 用 `gate-list` 而非 task.status 作为待验收清单 |
 
-**Resolved by the official guide** (was previously an assumption here): `check --unread
---inject` renders mail **for the terminal that runs it** and **cannot wake a different
-terminal**. Use `dispatch --inject` to deliver a tracked task, and `terminal send` to hand an
-existing agent a free-form prompt. Resident roles therefore drive their own rolling
-`check --wait` loop rather than being pushed.
+**已由官方文档解答（原为待验证）**：`check --unread --inject` 只为**运行它的那个终端**渲染邮件，**不能远程唤醒别的终端**。送 tracked task 用 `dispatch --inject`，给已有 agent 自由 prompt 用 `terminal send`。因此常驻角色的循环是它自己跑 rolling `check --wait`，不是被别人推醒。
 
 ---
 
-## 9. Rejected alternatives
+## 九、已否决方案及理由
 
-> An un-recorded rejection is negative-space dirt: it comes back and gets re-litigated.
+> 否决不落盘 = 负空间脏数据，会反复重现。
 
-| Rejected | Why |
+| 被否方案 | 否决理由 |
 |---|---|
-| Dispatching via `worktree create --agent --prompt` | no `taskId`/`dispatchId`, so no lifecycle authority. Use `--agent` → `terminal wait --tui-idle` → `dispatch --inject` |
-| Manual `task-update --status completed` after `worker_done` | a valid `worker_done` closes the task; manual updates are for recovery only |
-| Deciding lifecycle ownership by comparing terminal handles | handles are routing metadata and change on restart; authority is `taskId` + `dispatchId` |
-| Waking resident roles remotely via `check --inject` | it only renders mail for the terminal running it |
-| Group-addressing every message | `worker_done` / `heartbeat` must target a concrete coordinator handle; groups are for `status` broadcasts |
-| intake as a programmatic message listener | intake is a **human interface**; a TUI is supposed to be resident |
-| Stateless tick workers (automations as workers) | chose resident TUI for latency and cross-round memory; automations became the watchdog |
-| One coordinator doing both analyzer and verifier | two roles sharing one context, and boxed in by the built-in loop's semantics |
-| Custom task statuses for the two business states | status is a fixed six-value set; `--deps` + `gate` is cleaner and native |
-| Bucketing by problem category (crash / UI / perf) | category has no bearing on merge conflicts; touched files do. Category picks the model instead |
-| One worktree per problem | worktree count should equal bucket count — cheaper setup, and same-module problems belong together |
-| Multiple parallel fixers inside one worktree | they collide on the shared filesystem (git index, build artifacts) |
-| A self-rendered HTML board, or CLI-only notifications, as the acceptance view | an existing board gives per-problem granularity, a real UI, and a comment thread where the acceptance rationale lands |
-| Reading `workspaceStatus` to make scheduling decisions | that promotes a display projection to a source of truth |
-| Replacing dispatch with an agent's built-in sub-agent tool | no provenance, no lifecycle preamble, no `worker_done` authority, no gates |
+| `worktree create --agent --prompt` 派活 | 不挂 `taskId`/`dispatchId`，worker 无 lifecycle 权限。改用 `--agent` → `terminal wait --tui-idle` → `dispatch --inject` |
+| worker_done 之后再手动 `task-update --status completed` | 有效 worker_done 自动关单，手动更新只留给恢复/覆盖 |
+| 靠比对 terminal handle 判断 lifecycle 归属 | handle 是路由元数据，pane 重启即变。权限来自 `taskId` + `dispatchId` |
+| 靠 `check --inject` 远程唤醒常驻角色 | 它只为运行它的终端渲染邮件。常驻循环靠自己 rolling `check --wait` |
+| 统一用组地址寻址所有消息 | `worker_done` / `heartbeat` 必须指向具体 coordinator handle，组地址只给 `status` 类广播 |
+| intake 做成程序化消息监听器 | intake 是**人机界面**，TUI 本就该常驻 |
+| 定时 tick 无状态 worker（automation 当 worker） | 选了常驻 TUI 形态（实时性 + 跨轮记忆）。automation 改作 watchdog |
+| 单 coordinator 兼 analyzer + verifier | 两角色挤一个 context；且被内建循环语义框住，定制空间小 |
+| 自定义 task 状态表示「待验证 / 待验收」 | status 固定六值。改用 `--deps` + `gate`，更干净且是原生模式 |
+| 按问题分类（崩溃 / UI / 性能）分桶 | 分类与 merge 冲突无关，决定冲突的是 touched files。分类改作**选模型**依据 |
+| 一问题一 worktree | worktree 数应等于桶数：省 setup 与磁盘，且同模块问题本就该一起改 |
+| 一个 worktree 内起多个并行 fix agent | 共享文件系统会互相踩（git index、构建产物） |
+| 自渲染 HTML 看板 / 纯 CLI 通知作为验收视图 | 选了现成看板：粒度对得上单个问题、有 UI、有评论区让验收理由落地、可编程同步 |
+| 用 `workspaceStatus` 做调度决策 | 展示层投影，读它做判断 = 把展示当真源 |
+| 用各 agent 自带 subagent 工具替代 dispatch | 不产生 provenance、无 lifecycle preamble、无 `worker_done` 权限、无 gate |
 
 ---
 
-## 10. Known risks
+## 十、已知风险
 
-| Risk | Mitigation |
+| 风险 | 缓解 |
 |---|---|
-| False positives flood the queue | rule 7 — filter at the door |
-| One task fails dispatch repeatedly | **native circuit breaker**: three consecutive failures marks it `failed` |
-| Humans reject repeatedly and the outer loop never converges | the native breaker only covers dispatch failures — **count human rejections yourself**; cap them per parent and escalate with `gate-create --options` |
-| Three state stores drift | the one-directional rule in §4 |
-| Resident agent context blows up | rules 1 and 2 |
-| Coordinator restart strands in-flight `worker_done` | rule 4 — `task-list --ready` as fallback |
-| Killing a worker that is still working | rule 4 — timeouts and `{count:0}` are checkpoints |
-| No per-problem board in the orchestration layer | supply one externally |
+| 假阳性问题淹没队列 | 纪律 7：入口卡 |
+| 同一 task 反复 dispatch 失败 | **原生 circuit breaker**：连续 3 次失败自动标 `failed` |
+| 人反复打回，大循环不收敛 | 原生断路器只管 dispatch 失败，**人工打回要自己计数** —— parent 设打回上限，超限用 `gate-create --options` 转人工接管 |
+| 三套状态漂移 | 第四节单向纪律 |
+| 常驻 agent context 撑爆 | 纪律 1 + 2 |
+| coordinator 重启导致在途 `worker_done` 落空 | 纪律 4：`task-list --ready` 兜底 |
+| 误杀还在干活的 worker | 纪律 4：超时/`{count:0}` 是检查点 |
+| 问题粒度看板编排层原生没有 | 用外部看板补齐 |
 
 ---
 
-## 11. Does this generalize beyond bugs?
+## 十一、能不能推广到非 bug 的工作项
 
-Yes — but the dividing line isn't "bug vs task". The skeleton (queue, buckets, back edge,
-three-proof chain, state machine, the seven rules) is entirely work-item agnostic.
+能，但分界线不是「问题 vs 任务」。骨架（队列、桶、回边、三证链、状态机、七条纪律）全都与工作项类型无关。
 
-The real invariants are two:
+真正的不变量是两条：
 
-1. **Every queue item is independently acceptable.** A bug satisfies this naturally; an epic
-   does not and must be decomposed first.
-2. **Every queue item carries an executable acceptance criterion.** This is the one that
-   matters.
+1. **每个队列项可独立验收** —— bug 天然满足；epic 不满足，必须先拆。
+2. **每个队列项自带可执行的验收判据** —— 这条才是关键。
 
-The second explains why bugs fit so naturally: **a bug's reproduction path *is* its
-criterion** — objective, executable, and directly runnable by the peer-proof agent. A feature
-task carries no such thing; "add a filter" is not a criterion. The consequence of a missing
-criterion isn't slowness — **peer-proof degrades into subjective opinion and the three-proof
-chain collapses to two.**
+第 2 条解释了 bug 为什么天然适配：**bug 的复现路径就是判据**，客观、可执行，他证 agent 拿着就能跑。feature 任务不天然带判据，「做个筛选功能」不是判据。判据缺失的后果不是慢一点，是**他证退化成主观评价，三证链断成两证**。
 
-So the accurate definition is: *a workflow driven by independently acceptable work items that
-carry executable acceptance criteria.* Bug-driven is the special case where the criterion
-already exists.
+所以准确的定义是：**可独立验收、且自带可执行判据的工作项驱动的工作流**。「问题驱动」是判据天然存在的那个特例。
 
-Generalizing touches exactly three components:
+泛化只需要动三处（其余全通用）：
 
-| Component | Type-specific? |
+| 组件 | 是否按类型分化 |
 |---|---|
-| Queue / buckets / back edge / state machine / board contract / seven rules | no change |
-| **Intake spec template** | bug: symptom / repro / expected / impact hints / evidence. Task: requirement / acceptance criteria / scope / dependencies |
-| **Bucketing basis** | bug: existing touched files. New feature: files don't exist yet, so bucket by **module ownership** |
-| **Peer-proof criterion source** | bug: "no longer reproduces + no regression". Task: "each acceptance criterion satisfied" |
+| 队列 / 桶 / 回边 / 状态机 / 看板契约 / 七条纪律 | 不动 |
+| **入队 spec 模板** | bug 是「现象/复现/期望/影响线索/证据」；task 是「需求/验收标准/影响范围/依赖」 |
+| **分桶依据** | bug 靠存量 touched-files；新功能文件还不存在，桶边界改成**模块所有权** |
+| **他证判据来源** | bug 是「复现路径不再复现 + 无回归」；task 是「验收标准逐条满足」 |

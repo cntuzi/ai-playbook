@@ -1,120 +1,105 @@
-# Skill Architecture — five principles from eight hand-written skills
+# Skill 架构 —— 从八个手写 skill 里抽出的五条原则
 
-[中文](./README.zh-CN.md)
+我装了 72 个 agent skill，其中 8 个是自己写的。这篇讲这 8 个的共性 —— **是事后从产物里抽出来的**，
+不是先立了规范再照着写。这些 skill 是几个月里各自独立写的。
 
-I have 72 agent skills installed. I wrote 8 of them. This is what the 8 have in common —
-derived after the fact, from artifacts that were written independently over months, not from a
-style guide I set out with.
-
-That matters: three of these principles show up in skills that were never meant to be related.
-Independent rediscovery is the evidence that they're real, not aesthetic preference.
+这一点很关键：其中三条原则出现在彼此毫无关系的 skill 里。**独立重复发现**，才是它们是真原则、
+而不是个人审美偏好的证据。
 
 ---
 
-## 1. Decisions belong to the model, execution belongs to the script
+## 一、决策归模型，执行归脚本
 
-The `wt` skill (git worktree + branch + tmux management) states it in its own overview:
+`wt`（git worktree + 分支 + tmux 管理）自己的 overview 里就写着：
 
-> The script is a stateless thin wrapper — **path policy is decided by the agent.**
+> 脚本是无状态的薄封装，**路径策略由 Claude Code 决定**。
 
-So `wt.sh` never decides *where* a worktree goes or *what* the branch is called. It takes a
-name and does deterministic filesystem and tmux work. The agent reads "fix the chat crash",
-decides `fix-chat-crash`, and hands that down.
+所以 `wt.sh` 从不决定 worktree 放哪、分支叫什么。它接一个名字，做确定性的文件系统和 tmux 操作。
+agent 读到「修复聊天崩溃」，判断出 `fix-chat-crash`，再交给脚本。
 
-`codex`, `gemini` and `weekly` are the same shape without saying so: a `SKILL.md` that holds
-*when to delegate and what context to pass*, plus a script that holds *how to invoke*. The
-script contains no judgement. The skill contains no CLI syntax.
+`codex`、`gemini`、`weekly` 是同一个形态，只是没明说：`SKILL.md` 装**何时委托、传什么上下文**，
+脚本装**怎么调**。脚本里没有判断，skill 里没有 CLI 语法。
 
-The test: if your script has an `if` statement about *intent*, it's in the wrong half.
+判据：**如果你的脚本里有一个关于「意图」的 `if`，它站错了半边。**
 
-## 2. Authority and portable projection are different documents
+## 二、权威版和便携投影是两份文档
 
-`decision-hygiene` and `dirty-data-governance` both open with a version note that says, in
-effect: the authoritative version with cases and templates lives in the team methodology
-repository; **this file is the cross-project portable copy, kept in sync with it.**
+`decision-hygiene` 和 `dirty-data-governance` 开头都有一句版本声明，大意是：带案例和模板的权威
+完整版在团队方法论库，**本文件是跨项目个人便携版，更新时与权威源同步**。
 
-`fix-pipeline` arrived at the same split independently — command syntax is owned by the
-vendor's bundled guide (`orca skills get orchestration`), and the skill deliberately does not
-restate it, so it cannot drift out of sync with whatever CLI version is installed.
+`fix-pipeline` 独立走到了同一个分法 —— 命令语法归厂商自带的 guide（`orca skills get
+orchestration`），skill 刻意不复述，这样它不会跟你装的那个 CLI 版本漂移。
 
-Same rule appearing in three unrelated skills: **a portable copy must name its authority and
-say it's a projection.** Otherwise the copy silently becomes a second source of truth, and the
-two diverge without anyone noticing.
+同一条规则出现在三个不相关的 skill 里：**便携副本必须点名自己的权威源，并声明自己是投影。**
+否则副本会悄悄变成第二个真源，两边分叉了都没人察觉。
 
-## 3. Discipline skills change the default, they don't wait for a trigger
+## 三、纪律型 skill 改的是默认行为，不等触发词
 
-`decision-hygiene` and `dirty-data-governance` both instruct: *treat this as a default check
-on every summary, retrospective, or significant deliverable.*
+`decision-hygiene` 和 `dirty-data-governance` 都写着：**每次总结、复盘、重大产出时把它当默认
+检查项**。
 
-That's a different contract from a tool skill. A tool skill fires on a trigger phrase and does
-a job. A discipline skill has to alter behaviour on turns where nobody thought to invoke it —
-its value is precisely in the cases you *didn't* think to ask for it. Which means the
-description can't just list triggers; it has to name the recurring situation.
+这跟工具型 skill 是两种契约。工具型靠触发词点火，干一件事。纪律型必须在**没人想到要调用它的
+那些回合**里改变行为 —— 它的价值恰恰在你没想起来要用它的场合。这意味着它的 description 不能只
+列触发词，得点名那个反复出现的**情境**。
 
-## 4. Rules must be contextual, never all-on
+## 四、规则必须 contextual，不能全开
 
-`taste-skill` is 1206 lines of frontend design rules, and its second line is:
+`taste-skill` 是 1206 行前端设计规则，它的第二行就是：
 
-> Every rule below is **contextual**. None of it fires automatically. First read the brief,
-> then pull only what fits.
+> 下面每条规则都是**上下文相关**的，没有一条自动生效。先读 brief，再只取合适的。
 
-1206 lines applied unconditionally would produce exactly the templated slop the skill exists to
-prevent. So the first section is brief inference — read the room, *then* select.
+1206 行无条件全开，产出的正好是这个 skill 要防的模板味。所以它的第 0 节是 brief inference ——
+先读懂场子，**再**选规则。
 
-`fix-pipeline` solves the same problem structurally: a shared contract in `SKILL.md`, and one
-file per role, so an agent playing verifier never loads the analyzer's steps. Both are the same
-move — **volume is fine, unconditional application is not.**
+`fix-pipeline` 用结构解同一个问题：共享契约放 `SKILL.md`，每个角色一个文件，扮演 verifier 的
+agent 永远不会加载 analyzer 的步骤。两者是同一个动作 —— **量大没问题，无条件生效才是问题。**
 
-## 5. Related skills draw their borders explicitly
+## 五、相邻 skill 必须显式划界
 
-`decision-hygiene`'s own description says: *use together with `dirty-data-governance`
-(cleanup method); this skill owns when-to-trigger plus decision-layer dirt plus prevention.*
+`decision-hygiene` 的 description 里明写：*配合 `dirty-data-governance`（清理方法）使用；本
+skill 管「何时触发 + 决策层脏数据 + 预防」。*
 
-Two skills covering adjacent ground will compete for the same trigger unless one of them says
-out loud where the line is. Cheapest possible fix — one clause in the description — and it
-turns an ambiguous pair into a router.
+两个覆盖相邻领域的 skill，如果没有一方明说边界在哪，就会抢同一个触发。**最便宜的修法 ——
+description 里加一个从句**，一对含糊的 skill 就变成了一个路由。
 
 ---
 
-## The eight, by shape
+## 八个 skill 的谱系
 
-| Shape | Skills | Structure |
+| 形态 | Skill | 结构 |
 |---|---|---|
-| **Delegating to another AI CLI** | `codex`, `gemini` | `SKILL.md` (when to delegate, how to pass context) + `scripts/*.py` (invocation, JSON parsing, session resume) |
-| **Engineering workflow automation** | `wt`, `weekly` | `SKILL.md` (policy) + `scripts/*.sh` (deterministic execution) |
-| **Methodology as discipline** | `decision-hygiene`, `dirty-data-governance` | `SKILL.md` only; no script, no trigger phrase — they change the default |
-| **Taste constraint** | `taste-skill` (1206 lines) | one large reference body, gated by brief inference |
-| **Multi-role orchestration** | [`fix-pipeline`](../fix-pipeline/) | `SKILL.md` (shared contract) + `roles/*.md` (one branch per role) |
+| **委托给另一个 AI CLI** | `codex`、`gemini` | `SKILL.md`（何时委托、怎么传上下文）+ `scripts/*.py`（调用、JSON 解析、会话恢复） |
+| **工程流程自动化** | `wt`、`weekly` | `SKILL.md`（策略）+ `scripts/*.sh`（确定性执行） |
+| **方法论纪律** | `decision-hygiene`、`dirty-data-governance` | 只有 `SKILL.md`，无脚本、无触发词 —— 它们改的是默认行为 |
+| **品味约束** | `taste-skill`（1206 行） | 一大坨 reference，由 brief inference 把门 |
+| **多角色编排** | [`fix-pipeline`](../fix-pipeline/) | `SKILL.md`（共享契约）+ `roles/*.md`（一角色一分支） |
 
-Note the correlation: **the more the skill is about judgement, the less script it has.** The
-two methodology skills have no script at all. The two CLI wrappers are nearly all script.
+注意这个相关性：**skill 越是关于判断，脚本就越少。** 两个方法论 skill 一行脚本都没有；
+两个 CLI 封装几乎全是脚本。
 
 ---
 
-## What I install versus what I write
+## 什么装、什么自己写
 
-64 of the 72 are installed from upstream sources and are not mine to republish:
+72 个里有 64 个是从上游装的，不是我的东西，也不该由我转发：
 
-| Source | Skills |
+| 来源 | Skill |
 |---|---|
-| [mattpocock/skills](https://github.com/mattpocock/skills) | `ask-matt`, `code-review`, `codebase-design`, `domain-modeling`, `implement`, `tdd`, `teach`, `writing-*`, and others |
-| Feishu/Lark official skill set | `lark-*` (~25) |
-| Orca CLI bundled | `orca-cli`, `orca-linear`, `orchestration`, `computer-use` |
-| Others | `stitch-*`, `obsidian-vault`, `prototype`, `research`, … |
+| [mattpocock/skills](https://github.com/mattpocock/skills) | `ask-matt`、`code-review`、`codebase-design`、`domain-modeling`、`implement`、`tdd`、`teach`、`writing-*` 等 |
+| 飞书 / Lark 官方 skill 集 | `lark-*`（约 25 个） |
+| Orca CLI 自带 | `orca-cli`、`orca-linear`、`orchestration`、`computer-use` |
+| 其他 | `stitch-*`、`obsidian-vault`、`prototype`、`research`… |
 
-The rule I use for the boundary: **install anything that encodes general craft; write only what
-encodes my own environment or my own judgement.** Test discipline, code review, domain
-modelling — someone has already thought harder about those than I will. Worktree layout, report
-format, what counts as dirty data in my projects — nobody else can write those for me.
+我用的分界线是：**凡是沉淀通用手艺的，装；只有沉淀我自己环境、我自己判断的，才自己写。**
+测试纪律、代码评审、领域建模 —— 已经有人比我想得更透。worktree 怎么摆、周报什么格式、在我的
+项目里什么算脏数据 —— 这些没人能替我写。
 
-## Costs worth knowing before you write one
+## 动手写之前值得知道的成本
 
-- **A model-invoked skill's description sits in the context window every single turn.** That's
-  the standing cost of autonomous reach. A skill only you ever invoke by name should say so and
-  pay nothing.
-- **Splitting a skill spends one of two budgets**: context (a new always-loaded description) or
-  memory (one more thing you have to remember exists). Neither is free, so a split has to earn
-  it — a genuinely separate trigger, or a branch that carries material other branches shouldn't
-  load.
-- **A line the model would already obey is a line that costs tokens to say nothing.** "Be
-  thorough" changes no behaviour. The fix is a sharper word, not more words.
+- **model-invoked skill 的 description 每一轮都占着上下文窗口。** 这是「能被自动调用」的常驻
+  成本。只有你自己会按名字调的 skill，就该声明成 user-invoked，一分不花。
+- **拆 skill 花的是两种预算之一**：上下文（多一条常驻 description）或记忆（多一个你得记住它存在
+  的东西）。两种都不免费，所以拆分必须挣得回来 —— 要么是真正独立的触发，要么是一个分支携带了
+  别的分支不该加载的内容。
+- **模型本来就会遵守的那行字，是花 token 说了句废话。**「要仔细」不改变任何行为。修法是换一个
+  更锋利的词，不是加更多的词。
