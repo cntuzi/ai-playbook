@@ -28,17 +28,32 @@ orca orchestration task-list --ready --brief --json
 
 **判据**：每个领到的问题归入恰好一个桶，且任意两个桶的 touched-files 交集为空。
 
-### 4. 选模型
+### 4. 冲突检查（决定隔离方式和基线）
+
+分桶之后、起 worker 之前，两件事必须查：
+
+```bash
+# ① 桶内文件是否与工作区未提交改动重叠
+git status --porcelain -- <桶内每个文件>
+# ② 桶内文件在仓库默认基线上是否存在同一份代码
+git diff <default-base> HEAD -- <桶内主文件>
+```
+
+**① 有重叠** → 这是纪律 5 说的真实 checkout 冲突，必须建隔离 worktree。但先问人：那些未提交改动跟这个问题相关吗？相关的话别派 worker —— 让一个 agent 去抢人正在编辑的文件是负收益，退回让人自己改更快。
+
+**② 基线不一致** → 若 bug 涉及的代码只存在于当前特性分支（默认基线上根本没有这些符号），必须 `--base-branch <当前分支>`。官方默认建议是别基于特性分支，这是有证据的例外 —— 从默认基线切出来，fixer 会找不到要改的代码。
+
+### 5. 选模型
 
 用分类决定 `--agent`：崩溃、并发、数据一致性给强模型；文案、常量、样式给便宜模型。
 
-### 5. 起 worker 并派活
+### 6. 起 worker 并派活
 
 四步照 SKILL.md「派活的四步」。**多桶并行改同一 checkout 才建 worktree**（撞 git index 与构建产物是真实冲突）；单桶用同 worktree 新终端。
 
 桶 spec 写清：桶内问题清单（含各自的 task id）、修改顺序、每个问题的验收标准、报告写到哪。
 
-### 6. 建验证任务
+### 7. 建验证任务
 
 每个桶一个，依赖它的 fix task：
 
@@ -51,7 +66,7 @@ orca orchestration task-create \
 
 修复 task `completed` 后它自动可领，verifier 用 `task-list --ready` 拿到。
 
-### 7. 把问题 task 移出待领队列
+### 8. 把问题 task 移出待领队列
 
 ```bash
 orca orchestration task-update --id <problem_task> --status dispatched --json
@@ -59,7 +74,7 @@ orca orchestration task-update --id <problem_task> --status dispatched --json
 
 **这一步不能省。** 问题 task 分完桶仍然是 `ready`，不显式置 `dispatched` 的话，下一轮你会把同一个问题重新分一遍桶、重新派一个 worker。
 
-### 8. 推 Linear
+### 9. 推 Linear
 
 桶内每个问题：
 
@@ -68,7 +83,7 @@ orca linear status set <ISSUE> --to "In Progress" --json
 orca linear comment add <ISSUE> --body "已进桶 <bucket>（同桶还有 <ISSUE-A>, <ISSUE-B>），worker: <agent>" --json
 ```
 
-### 9. 回等
+### 10. 回等
 
 rolling `check --wait`。一次只回一条消息，N 个桶可能同时完成就循环 N 次，每次完成后把新变 ready 的任务派出去。
 
