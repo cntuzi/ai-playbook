@@ -239,9 +239,18 @@ orca orchestration dispatch-show --task <task_id> --json
 | `gate-create` 把 task 置为 `blocked` | ✅ **成立**。`ready` → `blocked` |
 | `gate-resolve` 之后 task 的状态 | ⚠️ **回 `ready`，不关单**。必须紧接一次 `task-update --status completed` |
 | 新建无依赖 task 的初始状态 | ⚠️ **是 `ready` 不是 `pending`**。`pending` = 依赖未满足 |
-| `@worktree:<id>` 组地址跨终端重建仍可寻址 | ⏸ **未测**。探针在非 Orca worktree 下跑，取不到 worktree id |
+| `@worktree:<id>` 组地址可寻址 | ✅ **成立**。在一个有 7 个活终端的 worktree 里实测：一次发送展开成 7 条点对点消息，共享一个 `thread_id`。展开发生在**发送时**，按当时的活终端列表算 —— 所以**跨终端重建天然稳定，不必维护 handle 表** |
 
-**这次测试的价值**：`pending` 语义那条推翻了设计里的一行，而且是致命的 —— skill 里 analyzer 第一步原本写的是 `task-list --status pending`，照着跑会**永远拿到空列表，整条流水线一动不动**。连带暴露另外两个断点（问题 task 分桶后不出队会被重复领取；打回时挂 `--parent` 会让重试 task 永久卡死）。三处都已修，见第四节。
+**这次测试的价值**：
+
+1. `pending` 语义那条推翻了设计里的一行，而且是致命的 —— skill 里 analyzer 第一步原本写的是 `task-list --status pending`，照着跑会**永远拿到空列表，整条流水线一动不动**。连带暴露另外两个断点（问题 task 分桶后不出队会被重复领取；打回时挂 `--parent` 会让重试 task 永久卡死）。三处都已修，见第四节。
+2. 组地址探针暴露了一个**设计层面**的问题：那条测试广播被一个正在做无关工作的 agent 收到**并回复了**。广播域是整个 worktree 的所有活终端，不是「流水线的角色们」。
+
+### 由此新增的约束：控制面 worktree 必须独占
+
+第七节原本写「建控制面 worktree，只放编排脚本和报告目录」，理由是代码隔离。实测后理由更硬：**它是广播域**。控制面里混进任何别的工作终端，intake 每次「新问题入队」的广播都会打扰无关 agent —— 而那些 agent 可能正在跑别人的长任务。
+
+推论：**不要把流水线的控制面放在你日常干活的 worktree 里**，哪怕只是临时试一下。
 
 **由官方文档解答（原为待验证）**：`check --unread --inject` 只为**运行它的那个终端**渲染邮件，**不能远程唤醒别的终端**。送 tracked task 用 `dispatch --inject`，给已有 agent 自由 prompt 用 `terminal send`。因此常驻角色的循环是它自己跑 rolling `check --wait`，不是被别人推醒。
 

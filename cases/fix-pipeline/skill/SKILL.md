@@ -27,6 +27,8 @@ orca orchestration task-list --brief --json   # 队列现状 = 你的 external m
 
 `orchestration` 是 Orca 实验特性，需在 Settings > Experimental 启用。命令报「未启用」就停下告诉用户，不要绕道用别的 spawn 工具替代（见「工具边界」）。
 
+**控制面 worktree 要独占**：`@worktree:<id>` 广播会送到该 worktree 里**每一个**活终端。控制面里混进别的工作终端，每条广播都会打扰无关 agent。
+
 ## 你是哪个角色
 
 读你自己那一份，不要读全部：
@@ -83,6 +85,8 @@ orchestration task ──推桶级进度──▶ worktree.workspaceStatus（只
 2. **报告写盘，只传路径。** `worker_done` payload 用 `reportPath` 带路径，正文落文件。纪律 1 靠它落地。
 3. **他证换 agent 且只读。** 复验 agent 必须与修复 agent 不同，且只读。换视角（能否复现 / 是否引入回归 / 是否改错了地方）比派 N 个同质复验有效。
 4. **队列是 external memory。** lifecycle 权限来自 payload 的 `taskId` + `dispatchId`，handle 只是路由元数据（pane 重启就换）。`worker_done` / `heartbeat` 从 worker 自己终端发给 preamble 里那个具体 coordinator handle；广播进度用 `status` 类型。coordinator 重启会让在途 `worker_done` 落空，靠 `task-list --ready` 找回该干的活。
+
+   **组地址的实测语义**：`@worktree:<id>` 在**发送时**按当时的活终端列表展开成 N 条点对点消息（共享一个 `thread_id`）。所以跨终端重建天然稳定 —— 不必维护 handle 表，重建后的新终端会自动进入下一次广播。代价是**广播域 = 整个 worktree 的所有活终端**：实测一条测试广播被一个正在干无关工作的 agent 收到并回复了。因此**控制面 worktree 必须独占**，只放流水线角色的终端。
 5. **桶按 touched-files 聚类。** 桶间文件不重叠 → 并行 merge 零冲突；桶内同模块串行改 → agent 拿到完整上下文。问题分类（崩溃 / UI / 性能）不用来分桶，用来**选模型**。
 6. **rolling wait 是常态。** `check --wait` 一次只返回一条消息，N 个 worker 可能同时完成就循环 N 次。超时或 `{count:0}` 是检查点，真实编码任务 15–60 分钟；heartbeat 和终端活动只证明活着。worker 还在产出就继续等。
 7. **假阳性在入口卡。** 扇出找问题的产出里相当比例是幻觉或不值得改。每个假问题穿过入口就要烧一个修复 agent + 一次复验 + 一次人工验收。入口多花一轮判断，比下游三次浪费便宜。
