@@ -248,6 +248,25 @@ Claude Code 会用当前任务描述持续覆盖 title，没有终端会一直�
 
 这解决了纪律 4 里那个悬着的问题：**terminal handle 随重启变化，父子关系不变**。派活方重启后 handle 失效，worker 依然能从 lineage 重新解析出当前的派活方，比只靠 `task-list --ready` 兜底强。
 
+### 回信前先反查：`sender_pane_key` 比 lineage 精确
+
+lineage 只能定位到 worktree，落到「这条消息到底是哪个终端发的」还得猜。**消息自己带着更精确的锚点**：
+每条 orchestration 消息有 `sender_pane_key`，格式 `<tabId>:<leafId>`。它认的是 tab 和 pane，
+**不随 handle 重新分配而变**。
+
+```bash
+orca orchestration inbox --limit 25 --json   # 取消息的 sender_pane_key
+orca terminal list --json                    # 按 tabId + leafId 匹配同一 pane → 当前 handle
+```
+
+实测：发件方 handle 从 `term_3b85fe5f` 变成 `term_789b2a1f`，`reply --id` 会打空，
+按 `tabId:leafId` 反查精确命中新 handle。
+
+⚠️ **回信前先反查，别直接用 `from_handle`。** `reply` 打到已死 handle 上**不报错也不到达** ——
+静默丢失，最难查的那种失败。你以为回了，对方永远等不到。
+
+（这条是跑起来的 console 角色自己发现并用上的，不是设计出来的。）
+
 ## 你是哪个角色
 
 读你自己那一份，不要读全部：
