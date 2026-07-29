@@ -29,6 +29,49 @@ orca orchestration task-list --brief --json   # 队列现状 = 你的 external m
 
 **控制面 worktree 要独占**：`@worktree:<id>` 广播会送到该 worktree 里**每一个**活终端。控制面里混进别的工作终端，每条广播都会打扰无关 agent。
 
+## 拓扑：用 worktree 父子关系统筹
+
+流水线的能力是跨项目的，但**每次运行绑定一个项目上下文** —— 在哪个项目下启动，就服务哪个项目。这个绑定用 Orca 的 worktree lineage 表达：
+
+```
+<项目 worktree>                    ← 在这里启动 fix-pipeline
+ └── fix-pipeline                  控制面（child，带项目代码）
+      │  ├─ 终端 intake
+      │  ├─ 终端 analyzer
+      │  └─ 终端 coordinator
+      ├── <bucket-a>               桶（控制面的 child）
+      │     ├─ 终端 fixer
+      │     └─ 终端 他证 agent（只读，同 worktree）
+      └── <bucket-b>
+```
+
+每层为什么这样：
+
+| 层 | 理由 |
+|---|---|
+| **控制面挂在项目下，且带项目代码** | analyzer 要读项目文件才能按 touched-files 分桶。控制面没有代码，analyzer 干不了活 —— 这是踩过的坑，不是理论 |
+| **控制面是独立 worktree，不复用项目 worktree** | 广播域隔离：项目 worktree 里通常有用户自己的多个终端 |
+| **桶是控制面的 child** | 表达「这个桶属于这条流水线」，而不是散落在项目下面 |
+| **他证不另开 worktree** | 在被验的那个桶里开第二个终端就够，只读。省一份 checkout，而且它要读的就是那个桶的改动 |
+
+### lineage 就是通信拓扑
+
+**任何时候要找谁，从 lineage 重新解析，不要存 handle。**
+
+```bash
+# worker 找它的 coordinator
+orca worktree show --worktree current --json     # → parentWorktreeId
+orca terminal list --worktree id:<parent> --json # → 找 title 为 coordinator 的终端
+
+# coordinator 找它管的桶
+orca worktree show --worktree current --json     # → childWorktreeIds
+
+# 广播只打到流水线内部
+orca orchestration send --to "@worktree:<控制面 id>" --type status ...
+```
+
+这解决了纪律 4 里那个悬着的问题：**terminal handle 随重启变化，父子关系不变**。coordinator 重启后 handle 失效，worker 依然能从 lineage 重新解析出当前的 coordinator，比只靠 `task-list --ready` 兜底强。
+
 ## 你是哪个角色
 
 读你自己那一份，不要读全部：
@@ -84,7 +127,7 @@ orchestration task ──推桶级进度──▶ worktree.workspaceStatus（只
 1. **常驻 agent 是路由器，不是工人。** 只碰 task id、标题、文件清单、report 路径。要读内容（diff、代码、报告正文）就派一次性子 agent。这条守住，每轮 context 增量是常数级；破了，两天撑爆。
 2. **报告写盘，只传路径。** `worker_done` payload 用 `reportPath` 带路径，正文落文件。纪律 1 靠它落地。
 3. **他证换 agent 且只读。** 复验 agent 必须与修复 agent 不同，且只读。换视角（能否复现 / 是否引入回归 / 是否改错了地方）比派 N 个同质复验有效。
-4. **队列是 external memory。** lifecycle 权限来自 payload 的 `taskId` + `dispatchId`，handle 只是路由元数据（pane 重启就换）。`worker_done` / `heartbeat` 从 worker 自己终端发给 preamble 里那个具体 coordinator handle；广播进度用 `status` 类型。coordinator 重启会让在途 `worker_done` 落空，靠 `task-list --ready` 找回该干的活。
+4. **队列是 external memory。** lifecycle 权限来自 payload 的 `taskId` + `dispatchId`，handle 只是路由元数据（pane 重启就换）。`worker_done` / `heartbeat` 从 worker 自己终端发给 preamble 里那个具体 coordinator handle；广播进度用 `status` 类型。coordinator 重启会让在途 `worker_done` 落空，靠 `task-list --ready` 找回该干的活。 更好的办法是从 lineage 重新解析出当前 coordinator（见「拓扑」一节）—— handle 会变，父子关系不会。
 
    **组地址的实测语义**：`@worktree:<id>` 在**发送时**按当时的活终端列表展开成 N 条点对点消息（共享一个 `thread_id`）。所以跨终端重建天然稳定 —— 不必维护 handle 表，重建后的新终端会自动进入下一次广播。代价是**广播域 = 整个 worktree 的所有活终端**：实测一条测试广播被一个正在干无关工作的 agent 收到并回复了。因此**控制面 worktree 必须独占**，只放流水线角色的终端。
 5. **桶按 touched-files 聚类。** 桶间文件不重叠 → 并行 merge 零冲突；桶内同模块串行改 → agent 拿到完整上下文。问题分类（崩溃 / UI / 性能）不用来分桶，用来**选模型**。
@@ -141,6 +184,6 @@ orca skills get orca-emulator    # iOS 模拟器复验
 
 完整推演、状态机取舍、**已否决方案及理由**、待验证假设：
 
-`../design.md`
+`/Users/hy/Documents/dmj/obsidian/Ai/notes/ai-native/Orca 问题修复流水线设计.md`
 
 改这条流水线的结构之前先读那份的「已否决方案」和「待验证假设」两节 —— 已经否掉的方案不必重新讨论，未验证的假设不要当事实用。
