@@ -139,10 +139,11 @@ orchestration task ──推桶级进度──▶ worktree.workspaceStatus（只
 `worktree create --prompt` 那条路**不挂** `taskId` / `dispatchId`，worker 拿不到 lifecycle 权限、发不出有效 `worker_done`。派活走这四步：
 
 ```bash
-# 1. 起 worker。仅当多桶并行改同一 checkout（撞 git index 与构建产物）才建 worktree
-orca worktree create --name <bucket> --agent codex --no-parent --json
+# 1. 起 worker。桶要挂在控制面下（见「拓扑」），并从 bug 所在分支切
+orca worktree create --name <bucket> --agent codex \
+  --parent-worktree id:<控制面 id> --base-branch <bug 所在分支> --setup skip --json
 #    worker handle = 响应里的 startupTerminal.handle
-#    单桶不并行时：orca terminal create --worktree active --title <bucket> --command "codex" --json
+#    父级挂错了可以事后改：orca worktree set --worktree id:<桶> --parent-worktree id:<控制面>
 
 # 2. 等 TUI 就绪，否则 prompt 被吞
 orca terminal wait --terminal <handle> --for tui-idle --timeout-ms 60000 --json
@@ -184,6 +185,6 @@ orca skills get orca-emulator    # iOS 模拟器复验
 
 完整推演、状态机取舍、**已否决方案及理由**、待验证假设：
 
-`/Users/hy/Documents/dmj/obsidian/Ai/notes/ai-native/Orca 问题修复流水线设计.md`
+`../design.md`
 
 改这条流水线的结构之前先读那份的「已否决方案」和「待验证假设」两节 —— 已经否掉的方案不必重新讨论，未验证的假设不要当事实用。
