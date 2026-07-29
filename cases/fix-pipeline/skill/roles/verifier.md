@@ -29,6 +29,10 @@ orca orchestration task-update --id <verify_task> --status dispatched --json
 
 认领和读取之间仍有毫秒级竞态（两个 tick 可能同时读到同一份 `--ready`）。认领后再拉一次 `task-show`，确认状态确实是 `dispatched` 且没有别的 verifier 已经在这个任务上建了 gate（`gate-list --task <parent>`）；已经有了就直接结束本轮，别重复劳动。
 
+⚠️ **认领只能由要干这活的 verifier 自己做。** 外人（人或别的 agent）为了止血从旁边把任务置成 `dispatched`，会让在途的 verifier 判定「有别人在做」而退出 —— 任务就变成孤儿：状态 `dispatched`、无人在做、且再也不会出现在 `--ready` 里，永远没人捡。
+
+要止血就**停自动化**（`automations edit <id> --disabled`），别动任务状态。已经变孤儿的，置回 `ready` 让下一轮领。
+
 ### 2. 派他证
 
 每个 ready 验证任务派一个**与修复 agent 不同**的只读 agent。喂给它：验证任务 spec 的他证要点 + 修复报告路径。
@@ -89,9 +93,25 @@ orca linear list-issues --team <TEAM> --state Todo --updated-at 1h --json
 
 ⚠️ `gate-resolve` 只把 task 从 `blocked` 放回 **`ready`**，不关单。中间不要插入别的操作 —— 停在 `ready` 且 `parent_id` 为空的 task，会被 analyzer 当成新问题重新分桶派活。
 
-### 6. 汇报待验收
+### 6. 汇报待验收（必须落到人真能看见的地方）
 
-有新 `In Review` 就推一条清单，一行一个：问题标题 + 修复位置 + 他证结论。发给 intake 终端或 hermes。
+`orchestration send` 只能送到终端，**人看不见**。所以他证通过后，至少要落一个人类可见的信号：
+
+```bash
+# ① Orca 看板卡片 —— 零配置，用户在 Orca 里立刻看得到
+orca worktree set --worktree <bucket> --workspace-status in-review \
+  --comment "机器复验通过，待验收：<一句话结论>" --json
+
+# ② Linear —— 主渠道
+orca linear status set <ISSUE> --to "In Review" --json
+orca linear comment add <ISSUE> --body "<他证结论 + 报告路径>" --json
+```
+
+`workspaceStatus` 平时是纯展示、不参与任何决策（纪律 6）—— 这里正是它唯一正确的用法：**给人看**。
+
+Linear 团队没有 `In Review` 状态时，保持 `In Progress` 并在评论里写明「机器复验通过，待人验收」，同时**必须**用 ① 兜底，否则看板上分不出「还在改」和「等你验收」。
+
+两条都推不出去（没有 Linear、Orca 卡片也不可见）时，**在报告里明确写「本轮无人类可见通知」**。别默认有人会看到。
 
 ## 完成判据
 
