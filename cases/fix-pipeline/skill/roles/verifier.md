@@ -17,6 +17,18 @@ orca orchestration task-list --ready --brief --json
 
 `check --wait` 一次只回一条，多个桶同时完成就循环领。超时或 `{count:0}` 是检查点。
 
+### 1.5 立刻认领（在做任何事之前）
+
+```bash
+orca orchestration task-update --id <verify_task> --status dispatched --json
+```
+
+**领到就先认领，然后再开始干活。** 你不是唯一的 verifier —— 定时 tick 会重叠：一轮他证要派子 agent，通常跑得比 tick 间隔久，于是下一个 tick 会领到同一个任务，两个 verifier 同时对同一个修复做他证、各建一个 gate、可能给出互相矛盾的结论。
+
+认领后它离开 `--ready`，后续 tick 就看不到它了。
+
+认领和读取之间仍有毫秒级竞态（两个 tick 可能同时读到同一份 `--ready`）。认领后再拉一次 `task-show`，确认状态确实是 `dispatched` 且没有别的 verifier 已经在这个任务上建了 gate（`gate-list --task <parent>`）；已经有了就直接结束本轮，别重复劳动。
+
 ### 2. 派他证
 
 每个 ready 验证任务派一个**与修复 agent 不同**的只读 agent。喂给它：验证任务 spec 的他证要点 + 修复报告路径。
