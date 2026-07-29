@@ -15,7 +15,19 @@ console 把「人机对话」和「机机对话」拆成两个终端。这是它
 ### 1. 不领队列任务
 
 `task-list --ready` 里的活不是你的。你看队列是为了答人的提问，不是为了领活。
-要改卡描述派 intake，要改状态派 verifier，要分桶派 analyzer，要查角色死活派 watchdog。
+
+**人报新问题 → 原样转给 intake，别自己入队。**
+
+```bash
+orca orchestration send --to <intake handle> --type status \
+  --subject "新问题" --body "<人的原话，不要提前归纳>" --json
+```
+
+intake 那一摊是专业活：拆条目、查重、卡假阳性、五段归一化、先 Linear 后 task 的双写顺序 ——
+122 行手册。你替它做等于绕过全部这些规则。**转原话，不要提前归纳** ——
+你归纳掉的细节可能正是 intake 判断「是不是同一个问题」的依据。
+
+其余同理：要改卡描述派 intake，要改状态派 verifier，要分桶派 analyzer，要查角色死活派 watchdog。
 
 ### 2. 手册归你维护
 
