@@ -36,6 +36,12 @@ Three generations of an AI data-analysis assistant, and why the first two produc
 
 **Stack:** Apache Doris + Python + Claude Code subagent + metric SSOT
 
+### [Fix Pipeline](./cases/fix-pipeline/)
+
+A queue-driven closed loop for putting a batch of bugs through multiple agents. A coding agent can usually write the fix; what it cannot do is tell you whether the fix is real. So every fix passes through a *different* read-only agent for cross-verification and a human acceptance gate before it counts. Includes the full agent manual and an honest account of what running it cost — three rounds on one bug, both reworks caused by bad inputs rather than bad fixing.
+
+**Stack:** Orca orchestration + Claude + Codex + git worktrees + issue tracker
+
 ## Tips
 
 Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
@@ -88,6 +94,12 @@ Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
 AI 数据分析助手的三代演进，以及前两代为什么会输出「很有说服力的错数字」。解法不是更好的 prompt —— 是埋点注册表、指标唯一实现层和三道自检闸。含七步构建教程和 14 个真实数据口径陷阱手册。
 
 **技术栈：** Apache Doris + Python + Claude Code subagent + 指标 SSOT
+
+### [问题修复流水线](./cases/fix-pipeline/)
+
+把一批 bug 交给多个 agent 跑成队列驱动的闭环。编码 agent 通常写得出那个修复，它做不到的是告诉你这个修复是不是真的 —— 所以每个修复都必须过一个**不同的**只读 agent 做独立复验，再由人验收才算数。含完整的 agent 手册，以及一份诚实的账：一个 bug 跑了三轮，两次返工都不是修得不好，是我给的输入不对。
+
+**技术栈：** Orca orchestration + Claude + Codex + git worktree + 问题看板
 
 ## 小技巧
 
