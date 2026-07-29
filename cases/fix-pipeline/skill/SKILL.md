@@ -36,6 +36,23 @@ orca orchestration task-list --brief --json   # 队列现状 = 你的 external m
 **这一节只负责把角色拉起来。角色怎么干活，全在它自己那份 `roles/*.md` 里。**
 守住这条，以后加角色只要加一个 roles 文件 + 在下面的列表里加一行，启动逻辑不用改。
 
+### 0. 先查这个项目下是不是已经在跑
+
+```bash
+orca worktree ps --limit 40 --json     # 找当前项目下有没有名为 fix-pipeline 的 child
+orca terminal list --worktree id:<控制面 id> --json   # 找到了就看它有几个终端
+```
+
+**找到了就停手，报告现状，不要建第二套。** 角色空闲不等于没在跑 —— 队列空的时候所有角色都闲着，
+但它们仍在循环里等活。
+
+⚠️ **「我上次关过了」不能作为判断依据，必须查。** 踩过：判定「控制面已删、流水线已停」就重新启动，
+结果在一套正在跑的流水线上又叠了一套，四个角色各有两份抢同一批任务。真相是上次的关闭只执行了一半
+（见「怎么停机」）。**关过 ≠ 关掉了。**
+
+同样别用 title 认（title 会被 agent 的任务描述持续覆盖）。要确认谁在跑，用
+`orchestration send` 发一条存活检查让它们自报角色 —— 这是唯一可靠的办法。
+
 ### 1. 先问一个参数
 
 **Linear team**：`orca linear team list --json`。只有一个就直接用，**多个必须问用户** ——
@@ -115,6 +132,70 @@ Linear team      <team>
 
 启动完自查：控制面终端数 = 角色数（没有多余的 fallback shell）、`automations list` 里有 watchdog、
 每个角色都回过一条自报角色的消息。
+
+## 怎么停机
+
+用户说「关掉 fix-pipeline」时执行这一节。
+
+**停机比启动难，因为要对抗自愈机制。** 三条铁律，都是踩出来的：
+
+### 铁律一：关闭是执行，不是通知
+
+**直接 `terminal close`，不要广播「请大家停下」。** 广播出去的通知角色可以不理会，而且没人检查它们
+是否真的停了。踩过：coordinator 把关闭通知发给全部五个角色，然后四个角色照样在循环里跑，
+人以为关了，一天后发现六个终端全在。
+
+礼节性通知可以发，但**通知不是停机手段**。停机的判据是 `terminal list` 返回空，不是「大家都收到了」。
+
+### 铁律二：先停 watchdog，否则你越关它越拉
+
+watchdog 的职责就是发现角色缺失并重建。不先停它，你关掉的每个角色都会在下一个探测周期被拉回来。
+
+**没有「停机模式」让它闭嘴** —— 它无法区分「角色挂了」和「人主动关的」。所以顺序不可颠倒。
+
+### 铁律三：流程必须无状态，不要指望「记住做到第几步」
+
+踩过：coordinator 执行到最后一步（销毁控制面 worktree）时 pane 重启，`incarnationId` 变了，
+重启后它只知道「我已收摊」，不知道还差一步，于是控制面一直留着。
+
+**修法不是让状态可恢复，是让流程无状态**：每一步都写成「查 → 若还在则做」，任何时刻中断，
+重跑同一套命令都能接着往下走。
+
+### 步骤
+
+```bash
+# ① 安全检查：有在途工作就不要停
+orca orchestration task-list --json      # 有 ready / dispatched / pending gate 就先收口
+orca orchestration gate-list --status pending --json
+```
+
+队列没收口就停机 = 丢活。有在途的桶（fixer 正在改）要么等它 `worker_done`，
+要么明确告诉用户「这些活会丢」并拿到确认。
+
+```bash
+# ② 先停 watchdog
+orca automations list --json             # 是 automation：--disabled（保留配置，别 remove）
+orca automations edit <id> --disabled --json
+orca terminal list --worktree id:<控制面> --json   # 是终端：直接 close
+orca terminal close --terminal <watchdog handle> --json
+
+# ③ 再停其余角色（一个个 close，不发通知）
+orca terminal close --terminal <handle> --json
+
+# ④ 销毁桶 worktree（若有），最后销毁控制面
+orca worktree rm --worktree id:<桶> --json
+orca worktree rm --worktree id:<控制面> --json
+```
+
+### 停机自查
+
+跑完把这三条**逐条查一遍**，任何一条不满足就重跑上面的步骤（它是幂等的）：
+
+1. `orca terminal list --worktree id:<控制面>` → 空
+2. `orca automations list` 里没有启用中的 fix-pipeline watchdog
+3. `orca worktree ps` 里当前项目下没有 fix-pipeline child
+
+**查完才算关掉。** 不查就宣布关闭，就是今天这个局面的来源。
 
 ## 拓扑：用 worktree 父子关系统筹
 
@@ -457,7 +538,23 @@ orchestration task ──推桶级进度──▶ worktree.workspaceStatus（只
 
    **判活用 `incarnationId` 当主键**（`orca terminal list --json` 的字段），handle 存在值里：同一个 key 换了值 = 换址，agent 没动；key 消失才**可能**是死。
 
-   ⚠️ **后半句还没验，别提前写成规则**：`incarnationId` 消失是否等价于进程死亡，目前无实测 —— 要等第一次 GONE 出现，并且用别的手段交叉确认（`ptyId` 是否也消失、该角色是否真的不再产出）。
+   ⚠️ **但 `incarnationId` 也不是绝对稳定的，它会整体重置。** 实测：本轮末尾出现过一个时刻，
+   控制面 **6 个终端的 incarnationId 同时全部换成新值**（`a3d0bfc3…` → `a6018fb1…` 等），
+   而 agent 的对话上下文是连续的 —— **写下这条的 console 自己就是活证据：它的 incarnation
+   从列表里消失了，而它正在执行**。
+
+   所以那句「`incarnationId` 消失 = 进程死亡」**已被证伪**，别用。
+
+   **判活的可用形态**（个体 vs 全体是分水岭）：
+
+   | 观测 | 结论 |
+   |---|---|
+   | 某个 handle 不在列，incarnation 还在 | 换址，agent 没动 |
+   | **全部** incarnation 同时换新值 | 系统级重置，不是任何一个 agent 死了 |
+   | 单个 incarnation 消失、其余不变 | **才可能**是死 —— 且必须交叉确认（发消息看有无回信、队列里它的任务有无推进） |
+
+   ⚠️ **这个「整体重置」现象目前没有解释，也不要去编一个。** 已知的只有观测本身。
+   按上一节的方法：先记不变量和边界，别给现象安机制名。
 
    跨时间对照要靠机器写的日志，别靠谁的记忆：每轮追加一行 `{incarnationId: handle}` 全量快照的 JSONL，相邻两行自己就是证据。⚠️ 但它只能证实变化发生过，**给不出频率下界** —— 变化是簇发的，两次采样之间可能发生了完整的「变了再变回来」。别拿它算频率。
 
