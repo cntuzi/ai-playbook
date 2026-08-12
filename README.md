@@ -42,6 +42,12 @@ A queue-driven closed loop for putting a batch of bugs through multiple agents. 
 
 **Stack:** Orca orchestration + Claude + Codex + git worktrees + issue tracker
 
+### [owt — One Skill, Three Agents](./cases/owt/)
+
+A skill that turns one sentence into an Orca child worktree with a coding agent already running inside it. The interesting half is distribution: Claude Code, Codex CLI, and omp each read a different skills directory, so one real directory plus two symlinks serves all three — no divergent copies. Includes what portability actually cost, and eight traps that each cost a broken workspace.
+
+**Stack:** Orca CLI + Agent Skills (`SKILL.md`) + Claude Code / Codex CLI / omp
+
 ## Tips
 
 Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
@@ -100,6 +106,12 @@ AI 数据分析助手的三代演进，以及前两代为什么会输出「很�
 把一批 bug 交给多个 agent 跑成队列驱动的闭环。编码 agent 通常写得出那个修复，它做不到的是告诉你这个修复是不是真的 —— 所以每个修复都必须过一个**不同的**只读 agent 做独立复验，再由人验收才算数。含完整的 agent 手册，以及一份诚实的账：一个 bug 跑了三轮，两次返工都不是修得不好，是我给的输入不对。
 
 **技术栈：** Orca orchestration + Claude + Codex + git worktree + 问题看板
+
+### [owt —— 一份 skill，三个 agent](./cases/owt/)
+
+一句话变成一个 Orca 子工作空间，里面的 coding agent 已经开跑了。更有意思的是分发那一半：Claude Code、Codex CLI、omp 各读各的 skills 目录，所以一个真实目录 + 两条软链就能同时服务三个 agent，不留互相漂移的副本。含通用化实际付出的代价，以及八个各赔过一个工作空间的坑。
+
+**技术栈：** Orca CLI + Agent Skills (`SKILL.md`) + Claude Code / Codex CLI / omp
 
 ## 小技巧
 

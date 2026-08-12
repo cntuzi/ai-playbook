@@ -1,0 +1,4 @@
+interface:
+  display_name: "OWT Orca Worktree"
+  short_description: "Hand a task off to a fresh Orca child worktree running its own agent"
+  default_prompt: "Use $owt to hand this task off to a new Orca child worktree."
