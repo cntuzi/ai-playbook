@@ -52,6 +52,33 @@ parent agent must fill before letting go:
 Rule of thumb: never replay the parent conversation into the briefing. Give
 paths and filenames and let the child agent read them itself.
 
+### "Completed" Is a Claim, Not an Acceptance
+
+The wrap-up half took a second pass to get right. The first version stopped at
+"child agent sets `workspace-status completed`" — which meant finished
+workspaces sat on disk forever, ~1GB each, because nothing ever reclaimed them.
+
+Adding reclamation exposed the real problem. A workspace whose card read
+`completed` turned out to be holding **3,772 lines of uncommitted work** across
+27 files, plus two untracked asset directories the agent forgot to `git add`.
+The card status is the child agent's self-report. It is not evidence that the
+work landed.
+
+So `done` is three gates, and failing any one of them stops the deletion:
+
+```bash
+git -C "$W" status --porcelain             # gate 1: clean tree?
+git -C "$W" rev-list --count "$TARGET..$B" # gate 2: branch merged? expect 0
+git -C "$W" stash list                     # gate 3: nothing stashed?
+```
+
+Gate 1 ignores gitignored build output but **counts untracked source and
+assets** — that is exactly where a child agent's work goes missing. Only after
+all three pass does it set the status and run `orca worktree rm --force`.
+
+The generalizable version: **when an autonomous agent reports done, verify the
+artifact, not the report.**
+
 ## Solution 2: One Source, Symlinks Out
 
 The distribution problem has a boring answer that works:
@@ -135,6 +162,15 @@ Every line below cost a broken workspace.
 - **Card status does not advance itself.** Created means `in-progress` forever
   until something explicitly completes it. That is why the briefing's last two
   sections exist.
+- **A directory that reappears after deletion is usually your IDE, not the CLI.**
+  An IDE still holding the deleted workspace open will `mkdir -p` the whole path
+  back on its next autosave, leaving a ~16KB shell. The tell is birth time: the
+  *file inside* is newer than the directory containing it, which a deletion
+  remnant can never be. Close the IDE window first, or it grows back.
+- **Verify removal by absence, not by looking at the disk.** After `worktree rm`,
+  the authoritative checks are that the entry is gone from the tool's own state,
+  from `git worktree list`, and from `git branch`. Disk leftovers can outlive all
+  three and still mean nothing.
 
 ## Files
 

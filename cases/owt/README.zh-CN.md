@@ -44,6 +44,28 @@ Orca CLI 已经把「建 checkout、建分支、起 agent、投喂 prompt」全�
 
 一条经验：别把父会话的上下文整段复述进简报。给路径和文件名，让它自己读。
 
+### 「completed」是自述，不是验收
+
+收尾这一半返工过一次。第一版止步于「子 agent 自己标 `workspace-status completed`」——
+结果是干完的空间永远躺在盘上，一个约 1G，因为没有任何人回收它。
+
+加上回收流程之后，真正的问题才露出来。一个卡片显示 `completed` 的空间，里面躺着
+**3772 行未提交的改动**，横跨 27 个文件，外加两个 agent 忘了 `git add` 的资源目录。
+卡片状态是子 agent 的自我报告，它不证明活落地了。
+
+所以 `done` 是三道闸，任一不过就停下，不删：
+
+```bash
+git -C "$W" status --porcelain             # 闸 1：工作区干净？
+git -C "$W" rev-list --count "$TARGET..$B" # 闸 2：分支已并？期望 0
+git -C "$W" stash list                     # 闸 3：有没有藏着的 stash
+```
+
+闸 1 忽略 gitignore 的构建产物，但**未跟踪的源码和资源要算进去** —— 子 agent 的活
+恰恰最容易从那儿漏掉。三道全过才标状态并 `orca worktree rm --force`。
+
+可推广的版本：**自主 agent 报完成时，验产物，不验报告。**
+
 ## 解法二：单一真源，软链出去
 
 分发问题的答案很无聊，但管用：
@@ -113,6 +135,13 @@ codex debug prompt-input | grep owt
   选之前先探测。
 - **卡片状态不会自己流转。** 建出来就是 `in-progress`，不显式改就一直是。这就是
   简报最后两段存在的理由。
+- **删完又冒出来的目录，多半是你的 IDE，不是 CLI。** IDE 还开着那个已删除的
+  workspace 时，下一次 autosave 会 `mkdir -p` 把整条路径写回来，留一个十几 K 的空壳。
+  判据是 birth time：**壳里的文件比装它的目录还新**，删除残留不可能这样。先关掉
+  IDE 那个窗口，否则删了还会长回来。
+- **验删除要看「查无此项」，不是看磁盘。** `worktree rm` 之后，权威判据是工具自己的
+  状态里没有了、`git worktree list` 里没有了、`git branch` 里没有了。磁盘残留可以
+  比这三样都活得久，而且什么也不说明。
 
 ## 文件
 

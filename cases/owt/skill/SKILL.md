@@ -1,7 +1,7 @@
 ---
 name: owt
 description: Orca 子工作空间（Orca WorkTree）：把一段任务描述变成 Orca 子工作空间并直接起 agent 跑（full handoff：建 checkout → 起 codex / claude / omp / 任一已装 TUI agent → 投喂简报 → 报地址 → 停）。当用户输入 /owt、$owt、/skill:owt，或说「丢到子空间做」「开个子工作空间跑这个」「交给另一个 agent 去做」时使用。`wt` 是 tmux + 裸 git worktree 的那一套，本 skill 是 Orca 版。
-argument-hint: "<一段任务描述> | ls"
+argument-hint: "<一段任务描述> | ls | done [<选择器>]"
 ---
 
 # owt — 一句话开 Orca 子工作空间
@@ -36,6 +36,7 @@ Orca CLI 已经把「建 checkout、建分支、起 agent、投喂 prompt」全�
 ```
 owt <一段话>    建子工作空间并起 agent
 owt ls          列出当前空间的子工作空间及状态
+owt done [<选择器>]  验干净 → 标 completed → 回收空间
 ```
 
 前置：`orca` CLI 在 PATH 里，且当前目录属于某个 Orca 管理的 worktree。
@@ -151,7 +152,8 @@ orca terminal read --terminal <handle> --limit 60 --json   # result.terminal.tai
 5. **边界**：范围上限、别碰哪些文件、别提交到主干、别改父工作区
 6. **收尾协议**：checkpoint 更 `orca worktree set --worktree current --comment "..."`；
    完事 `--workspace-status completed` + 项目自己的任务状态同步（见项目 agent 入口文档）
-   + Linear（有链接才动）
+   + Linear（有链接才动）。**标 completed 之前先把活提交掉**——工作区脏着标完成，
+   父空间回收时就得停下来问人，等于没收尾。新加的资源文件别漏 `git add`
 7. **没人盯着你**：自己收尾，结论写进 comment，别等指令
 
 别把父会话的上下文整段复述进去——给路径和文件名，让它自己读。
@@ -195,6 +197,36 @@ orca worktree ps --json
 按 `parentWorktreeId == 当前 worktree id` 过滤，输出 displayName / comment /
 workspaceStatus / 分支 / 路径。
 
+## done：验干净再回收
+
+**`completed` 不等于可以删。** 子 agent 自己标的状态只说明它认为活干完了，不证明
+活真的落地了——实测出现过标着 `completed`、工作区里躺着 3700 行未提交改动的空间。
+所以 done 是三道闸，任一不过就停下报告，**别删**：
+
+```bash
+W=<worktree 路径>; B=<worktree 分支>; TARGET=<父分支全名>
+
+git -C "$W" status --porcelain                  # 闸 1：工作区干净？
+git -C "$W" rev-list --count "$TARGET..$B"      # 闸 2：分支已并？期望 0
+git -C "$W" stash list                          # 闸 3：有没有藏着的 stash
+```
+
+- **闸 1 有输出** → 列出改了什么，问用户：提交 / 丢弃 / 先不删。
+  过滤掉 gitignore 的构建产物（`Pods/`、`node_modules/`、`.build/` 之类）再判断，
+  但 `??` 的**源码和资源文件**要算进去——子 agent 新加的资源最容易漏。
+- **闸 2 非 0** → 报告差几个 commit，问用户：合过去 / 先不删。
+- 三道全过 → 标状态并回收：
+
+```bash
+orca worktree set --worktree id:<repoId>::<path> --workspace-status completed --json
+orca worktree rm  --worktree id:<repoId>::<path> --force --json
+```
+
+`rm` 会同时删掉 Orca 卡片、git worktree 注册、目录和分支。
+不带选择器的 `owt done` 指当前空间；带一段文字就按 `name:` / `branch:` 语义匹配。
+
+删完扫一眼父目录：目录残留见下面的 Xcode 坑。
+
 ## 硬约束（都踩过）
 
 - `--display-name` 不在 create 的 flag 列表里，建完补
@@ -209,7 +241,14 @@ workspaceStatus / 分支 / 路径。
   命令结束后终端仍是 `running`，`wait --for exit` 拿不到信号（实测 `result: null`）。
   要在终端里等就自己发 sentinel（`...; echo DONE=$?`）轮读
 - 建 worktree 前确认磁盘剩余 > 2G
-- `worktree rm --force` 会同时删掉目录和分支，实测无残留
+- `worktree rm --force` 会同时删掉卡片、git worktree 注册、目录和分支，本身干净
+- **删完目录又冒出来，多半不是 orca 没删干净，是 IDE 事后重建的**。IDE 还开着那个
+  已删除的 workspace 时，autosave 会 `mkdir -p` 把整条路径写回来，留一个十几 K 的空壳
+  （Xcode 的 `*.xcworkspace/xcuserdata/*/UserInterfaceState.xcuserstate` 就是这样）。
+  判据是 birth time：**壳里的文件比目录还新** = 事后重建，删除残留不可能比容器新。
+  确认方法是 `orca worktree ps` / `git worktree list` / `git branch` 里都查无此项。
+  处理：先关掉 IDE 里那个窗口，再 `rm -rf` 空壳，否则删了还会长回来
+- **`completed` 是子 agent 的自述，不是验收**。回收前必须自己验工作区和分支，见 done 一节
 
 ## 引导交给 Orca worktree hook
 

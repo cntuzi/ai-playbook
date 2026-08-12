@@ -44,7 +44,7 @@ A queue-driven closed loop for putting a batch of bugs through multiple agents. 
 
 ### [owt — One Skill, Three Agents](./cases/owt/)
 
-A skill that turns one sentence into an Orca child worktree with a coding agent already running inside it. The interesting half is distribution: Claude Code, Codex CLI, and omp each read a different skills directory, so one real directory plus two symlinks serves all three — no divergent copies. Includes what portability actually cost, and eight traps that each cost a broken workspace.
+A skill that turns one sentence into an Orca child worktree with a coding agent already running inside it. The interesting half is distribution: Claude Code, Codex CLI, and omp each read a different skills directory, so one real directory plus two symlinks serves all three — no divergent copies. Includes why "the agent says it's done" is not a reason to reclaim its workspace, and a trap list that each entry cost a broken workspace to learn.
 
 **Stack:** Orca CLI + Agent Skills (`SKILL.md`) + Claude Code / Codex CLI / omp
 
@@ -109,7 +109,7 @@ AI 数据分析助手的三代演进，以及前两代为什么会输出「很�
 
 ### [owt —— 一份 skill，三个 agent](./cases/owt/)
 
-一句话变成一个 Orca 子工作空间，里面的 coding agent 已经开跑了。更有意思的是分发那一半：Claude Code、Codex CLI、omp 各读各的 skills 目录，所以一个真实目录 + 两条软链就能同时服务三个 agent，不留互相漂移的副本。含通用化实际付出的代价，以及八个各赔过一个工作空间的坑。
+一句话变成一个 Orca 子工作空间，里面的 coding agent 已经开跑了。更有意思的是分发那一半：Claude Code、Codex CLI、omp 各读各的 skills 目录，所以一个真实目录 + 两条软链就能同时服务三个 agent，不留互相漂移的副本。含「agent 说干完了」为什么不足以回收它的空间，以及一份每条都赔过一个工作空间的坑表。
 
 **技术栈：** Orca CLI + Agent Skills (`SKILL.md`) + Claude Code / Codex CLI / omp
 
