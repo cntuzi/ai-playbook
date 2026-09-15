@@ -6,7 +6,7 @@
 
 <a id="english"></a>
 
-Real-world AI engineering practices — not theory, but working systems.
+Real-world AI engineering practices, with notes and ramblings from the work along the way.
 
 This repo documents how I build AI-powered development workflows: autonomous coding agents, spec-driven development, automated reporting, and more. Each case is a complete, battle-tested system running in production.
 
@@ -58,6 +58,10 @@ Observations and open questions from working with AI agents. These notes disting
 
 - [Why key questions get lost in agent conversations](./notes/agent-conversation-topic-loss.zh-CN.md) (Chinese only) — How topic branching, unresolved questions, and missing resumption cues affect ongoing work; includes primary research and its limits.
 
+## Ramblings
+
+[Thoughts on business evolution, organizations, and AI Native systems](./ramblings/) (Chinese only). Working ideas, open questions, and earlier drafts, collected as the thinking develops.
+
 ## Philosophy
 
 - **Document working systems**, not hypothetical architectures
@@ -77,7 +81,7 @@ Observations and open questions from working with AI agents. These notes disting
 
 ## 中文
 
-真实的 AI 工程实践 —— 不是理论，是跑在生产环境的系统。
+真实的 AI 工程实践，以及过程中的观察和碎碎念。
 
 这个仓库记录了我构建 AI 驱动开发工作流的实践：自主编码 agent、spec 驱动开发、自动化报告等。每个案例都是完整的、经过实战验证的系统。
 
@@ -130,6 +134,10 @@ AI 数据分析助手的三代演进，以及前两代为什么会输出「很�
 与 AI Agent 协作过程中的观察和开放问题。记录研究依据、分析判断，以及仍待验证的部分。
 
 - [Agent 对话为什么会丢失关键问题](./notes/agent-conversation-topic-loss.zh-CN.md) —— 梳理多话题分岔、悬置问题和接续困难，分析问题关系与状态为何容易丢失，并保留一手研究及适用边界。
+
+## 碎碎念
+
+[关于业务演进、组织和 AI Native 的一些想法](./ramblings/)。有相对成形的判断，也有还在发散的问题和一路改过来的旧稿，边做边记，慢慢修正。
 
 ## 理念
 
