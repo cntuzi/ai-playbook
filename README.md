@@ -52,6 +52,12 @@ A skill that turns one sentence into an Orca child worktree with a coding agent 
 
 Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
 
+## Notes
+
+Observations and open questions from working with AI agents. These notes distinguish research evidence from hypotheses and record ideas that still need validation.
+
+- [Why key questions get lost in agent conversations](./notes/agent-conversation-topic-loss.zh-CN.md) (Chinese only) — How topic branching, unresolved questions, and missing resumption cues affect ongoing work; includes primary research and its limits.
+
 ## Philosophy
 
 - **Document working systems**, not hypothetical architectures
@@ -118,6 +124,12 @@ AI 数据分析助手的三代演进，以及前两代为什么会输出「很�
 独立的小技巧记录，不成体系但实用：
 
 - [macOS 脚本自动连接带 TOTP 动态码的 VPN](./tips/macos-vpn-totp-autoconnect.md) —— 动态码本地计算 + 钥匙串 partition ID 坑
+
+## 思考记录
+
+与 AI Agent 协作过程中的观察和开放问题。记录研究依据、分析判断，以及仍待验证的部分。
+
+- [Agent 对话为什么会丢失关键问题](./notes/agent-conversation-topic-loss.zh-CN.md) —— 梳理多话题分岔、悬置问题和接续困难，分析问题关系与状态为何容易丢失，并保留一手研究及适用边界。
 
 ## 理念
 
