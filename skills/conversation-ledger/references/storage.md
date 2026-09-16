@@ -75,6 +75,8 @@ The Markdown files hold current state. Read them before making decisions; an ind
 
 This pure-file version is intended for one writer at a time. A read-before-write check alone cannot guarantee safe simultaneous edits by independent agents, Obsidian, and sync software. If overlapping writers are active, save a separate session note with pending changes and leave shared question edits for reconciliation. A shared writer service belongs to the later runtime design.
 
+The optional [capture runtime](runtime.md) additionally creates source notes at `Sessions/S-<hash>/E-<id>.md`, with `type: conversation-source`. Treat these as source evidence, separate from the manually maintained session summary and question notes. Its queue and review receipts are local runtime state; they do not replace Markdown question state. Use the runtime batch workflow to mark captured records reviewed.
+
 ## Obsidian access
 
 Use available local filesystem tools for Markdown and `.base` files; the skill has no mandatory Obsidian plugin or CLI dependency. Preserve live user edits as described above. If the user already has an Obsidian integration, it can provide reads and targeted writes through the same workflow.

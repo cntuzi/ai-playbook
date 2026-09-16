@@ -1,6 +1,6 @@
 ---
 name: conversation-ledger
-description: Preserve questions, decisions, evidence, and resumption cues from branching agent conversations in Markdown or an Obsidian vault. Use when the user asks to track discussion threads, save unresolved questions, checkpoint a conversation, or resume a previously recorded question.
+description: Preserve questions, evidence, and resumption cues from branching agent conversations in Markdown or Obsidian. Use to track discussion threads, checkpoint or resume questions, or enable local conversation capture hooks.
 ---
 
 # Conversation Ledger
@@ -13,8 +13,9 @@ Keep a durable record of what is still worth discussing, how far each question h
 - **Track this session**: when requested, checkpoint meaningful changes while continuing the user's work. Consider new questions, topic switches, decisions, and explicit pauses; write when there is a change worth keeping. Stop ongoing tracking when the user asks.
 - **Status**: read the ledger and show relevant unresolved questions, their latest progress, and a continuation cue. This operation is read-only.
 - **Resume**: read the selected question and its evidence, then continue the user's requested discussion. If asked only for a handoff or brief, return the material without executing its suggested next steps.
+- **Enable/pause automatic capture**: when requested, use [references/runtime.md](references/runtime.md) to install, inspect, disable, or remove the local runtime. A request to pause recording applies to active runtime capture as well as best-effort tracking.
 
-This skill runs when the host invokes it. Ongoing tracking is a best-effort instruction within the current session, not a background subscription or an every-turn guarantee. Hooks and a shared service require a separate implementation. Report which visible conversation range was actually processed.
+The Skill performs semantic review when the host follows it. The optional runtime captures supported events independently and injects next-turn review guidance; final-response classification can remain pending. When runtime guidance or unreviewed captures are present, follow [references/runtime.md](references/runtime.md) to process and acknowledge them. Distinguish captured, exported, and reviewed records, and report the actual coverage.
 
 ## Locate the ledger
 

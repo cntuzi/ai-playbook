@@ -52,7 +52,7 @@ A skill that turns one sentence into an Orca child worktree with a coding agent 
 
 ### [Conversation Ledger](./skills/conversation-ledger/)
 
-Preserve open questions, progress, evidence, and continuation cues as Markdown or Obsidian notes. Share a ledger across agents using stable question IDs. This first release provides instructions and templates; automatic runtime hooks and a shared writer remain design proposals.
+Preserve open questions, progress, evidence, and continuation cues as Markdown or Obsidian notes. Share a ledger across agents using stable question IDs. Includes opt-in capture hooks for Codex, Claude Code, and Pi, with pending-review tracking. An independent observer and shared question writer remain design proposals.
 
 ```bash
 npx --yes skills add cntuzi/ai-playbook --skill conversation-ledger -g -y
@@ -141,7 +141,7 @@ AI 数据分析助手的三代演进，以及前两代为什么会输出「很�
 
 ### [Conversation Ledger / 对话问题台账](./skills/conversation-ledger/)
 
-将开放问题、讨论进展、依据和续聊入口保存为 Markdown 或 Obsidian 笔记，通过稳定问题 ID 在不同 Agent 间接着讨论。当前交付规则和模板；运行时自动触发与单一写入服务仍是设计提案。
+将开放问题、讨论进展、依据和续聊入口保存为 Markdown 或 Obsidian 笔记，通过稳定问题 ID 在不同 Agent 间接着讨论。提供规则、模板，以及可选的 Codex、Claude Code、Pi 事件采集与待整理记录；独立观察者和共享问题写入服务仍是设计提案。
 
 ```bash
 npx --yes skills add cntuzi/ai-playbook --skill conversation-ledger -g -y

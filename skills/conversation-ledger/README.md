@@ -6,7 +6,7 @@
 
 把多话题对话中的问题、进展、依据和下次继续的入口保存为 Markdown。换一个 Agent 后，只要能读取同一份记录，就可以接着讨论。
 
-这是可安装的纯文件 Skill，附问题模板、会话模板和可选 Obsidian Bases 视图。执行依赖 Agent 的文件读写工具；不需要启动服务或安装 Obsidian 插件。
+这是可安装的 Skill，附问题模板、会话模板、可选 Obsidian Bases 视图，以及本地事件采集运行时。手动记录依赖 Agent 的文件工具；启用自动采集后，Hooks 会独立保存支持的消息。不需要 Obsidian 插件或额外的模型 API Key。
 
 ### 一条命令安装
 
@@ -29,6 +29,35 @@ npx --yes skills add cntuzi/ai-playbook --list
 ```
 
 安装语法、目标 Agent 和链接方式由 [skills CLI](https://github.com/vercel-labs/skills) 提供；本仓库不需要发布 npm 包。安装完成后按宿主要求刷新技能列表或开启新会话。
+
+### 启用自动采集
+
+安装 Skill 后对 Agent 说：
+
+```text
+使用 conversation-ledger，为当前项目启用自动采集，接入 Codex、Claude Code、Pi。
+```
+
+Agent 会调用随 Skill 提供的安装器。也可以用以下两条命令完成项目级安装和启用：
+
+```bash
+npx --yes skills add cntuzi/ai-playbook --skill conversation-ledger -a codex claude-code pi -y
+node .agents/skills/conversation-ledger/scripts/ledger.mjs install --agents codex,claude-code,pi
+```
+
+运行时安装器要求 macOS/Linux、Node.js 22+。可在第二条命令添加 `--root /实际Vault路径/Agent`，否则沿用已配置位置或项目内的本地台账。它合并项目 Hooks、备份原配置，并复制独立的运行时代码。更新 Skill 后，再运行一次 `install` 部署新代码。
+
+**Codex 需要在 `/hooks` 中信任新配置，项目本身也须受信任；Pi 项目扩展同样受项目信任控制。**按宿主要求重载或重启。安装器不会绕过这些要求。用 `status` 查看各宿主最后收到的事件，确认真实采集是否发生。[Codex Hooks](https://learn.chatgpt.com/docs/hooks)、[Pi Extensions](https://pi.dev/docs/latest/extensions)
+
+自动流程是：**收到事件 → 本地持久化 → 导出 Markdown 来源 → 下一轮引导 Agent 整理 → 有记录后确认批次。**最后一条回复会先保存原文，语义整理可能等到下一轮或显式检查点；不会为了整理而强制 Agent 不停续跑。
+
+```bash
+node .agents/skills/conversation-ledger/scripts/ledger.mjs status
+node .agents/skills/conversation-ledger/scripts/ledger.mjs disable
+node .agents/skills/conversation-ledger/scripts/ledger.mjs uninstall
+```
+
+`disable` 暂停采集，`uninstall` 移除本工具的 Hooks 并保留数据及其他配置。完整操作见 [运行时说明](./references/runtime.md)。
 
 ### 怎么用
 
@@ -67,6 +96,7 @@ Codex 也可显式使用 `$conversation-ledger`。按标题选择出现歧义时
 Agent/
   Questions/Q-<uuid>.md   # 问题、进展、未解决点、证据、继续入口
   Sessions/S-<uuid>.md    # 会话来源、覆盖范围、候选与待同步内容
+  Sessions/S-<hash>/E-<id>.md # 运行时自动保存的消息来源
   questions.base         # 可选 Obsidian 视图
 ```
 
@@ -76,17 +106,21 @@ Agent/
 
 ### 能力边界
 
-- **已提供**：记录、查看、续聊工作流，Markdown 模板，Obsidian 视图模板，多宿主安装结构。
-- **按需执行**：由宿主加载 Skill 后执行；“持续跟踪”是当前会话内尽力遵循的指令，可能受技能加载和上下文压缩影响。
-- **后续设计**：严格每轮触发、后台观察者、MCP 服务和单一写入服务。这次安装不包含这些运行时组件。
-- **首版单写入者**：多个 Agent 可以先后更新同一问题；同时编辑同一文件时只能检测部分冲突，不能保证并发安全。
-- **可见性边界**：只处理 Agent 实际可见的对话。没有文件工具时返回待保存的 Markdown，不会宣称已落盘。
+- **已提供**：记录、查看、续聊工作流，模板，三宿主采集适配，断点补导出，以及待整理批次的确认机制。
+- **语义判断**：问题识别与收束由主 Agent 按 Skill 执行；运行时分别记录“已采集、待导出、待整理”，不把触发成功视为整理完成。
+- **后续设计**：独立后台观察者、MCP 服务和共享问题写入服务。
+- **并发边界**：自动事件各写独立文件；问题笔记仍要求一个写入者。同时手工编辑或跨设备同步不具有完整并发保证。
+- **可见性边界**：采集用户/助手文本及部分生命周期事件，不覆盖所有工具输出、图片、历史消息或中断场景。没有原生消息 ID 时保留每次投递，宿主重试可能形成重复来源；导出重放不会重复创建同一个来源文件。
 
 语义准确性还需真实对话验证；安装成功和模板校验不能证明不会漏掉关键问题。
 
 ### 发布校验
 
-2026-09-16：Skill 格式校验通过；Markdown 相对链接、模板填充后的 YAML 和 Codex 界面元数据校验通过。在临时项目中使用 `skills` CLI 安装到 Codex、Claude Code、Pi，三个目录均能读取完整的 7 个发布文件，文件内容与源码一致。此校验未启动三个 Agent 执行真实对话，也未进行 Obsidian 界面验收。
+仓库测试可用 `node --test tests/conversation-ledger.test.mjs` 运行。覆盖安装/卸载保留其他配置、原生 ID 重放、同轮多次输入、离线补写、并发采集、路径转义、来源修改保护、批次确认和非阻塞 Hook 输出。
+
+2026-09-16：13 项自动测试通过；通过本机 Pi 0.85.1 的 SDK 加载实际生成的扩展，并触发测试回调验证落盘。Codex/Claude Code 使用 Hook 输入样例和生成的真实命令验证，未替用户信任或启用正在使用的会话。
+
+验证区分安装、事件机制和模型效果：CLI 安装与事件测试通过不代表问题识别已经达到某个召回率。完整真实对话和 Obsidian 界面仍需使用验证。
 
 ### 分析与设计
 
@@ -118,4 +152,17 @@ Use conversation-ledger to prepare a handoff for Q-... without executing it.
 
 The default root is `.conversation-ledger/data/` in the workspace. A local `location.json` remembers a selected external root; default local records are ignored by Git. Obsidian is optional. The installed skill includes question and session templates and a Bases view template.
 
-This release provides instructions and assets, with no daemon, hooks, MCP server, or automatic transcript subscription. Ongoing tracking is best effort while the host follows the skill. Use one writer at a time; a file reread is not a concurrency guarantee. Source coverage and user edits take precedence over inferred completeness.
+### Automatic capture
+
+Ask the installed skill to enable automatic capture for the current workspace, or use a project installation:
+
+```bash
+npx --yes skills add cntuzi/ai-playbook --skill conversation-ledger -a codex claude-code pi -y
+node .agents/skills/conversation-ledger/scripts/ledger.mjs install --agents codex,claude-code,pi
+```
+
+The installer supports macOS/Linux and Node.js 22+. It preserves existing hook settings, deploys a self-contained runtime, and supports status, disable, and uninstall. Add `--root /path/to/vault/Agent` to select a ledger. Codex requires trusting new definitions through `/hooks`; project trust and host reload still apply. Rerun the installer after updating the skill.
+
+Callbacks persist supported text/lifecycle events and export immutable source notes. Next-turn guidance asks the main Agent to checkpoint pending batches. Final-response classification may wait until the next turn or an explicit checkpoint; Stop hooks never force continuation. There is no independent model observer or MCP server in this version.
+
+Raw events support concurrent callbacks; question-note edits still require one writer. Capture coverage, unreviewed records, and user edits remain explicit. See [runtime operations](./references/runtime.md) for review receipts and limitations.

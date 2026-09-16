@@ -2,9 +2,9 @@
 
 日期：2026-09-15
 
-状态：完整运行时的设计提案，尚未实现或实测。按单人、本地 Pi/omp、一个 Obsidian Vault 起步，第 8 节扩展到跨宿主；多设备并发写入不包含在首版范围。
+状态：完整目标架构的设计提案，已有部分实现，未完成全部功能或真实对话验收。按单人、本地 Pi/omp、一个 Obsidian Vault 起步，第 8 节扩展到跨宿主；多设备并发写入不包含在首版范围。
 
-2026-09-16 已提供 [conversation-ledger Skill](../skills/conversation-ledger/README.md)，包含记录与续聊规则、Markdown 模板和 Obsidian 视图模板。本文中的事件队列、后台观察者、MCP 服务、宿主适配器与单一写入模块仍是后续方案；Skill 内的文件读改写不能提供这些运行时保证。
+2026-09-16 已提供 [conversation-ledger Skill](../skills/conversation-ledger/README.md)，包含记录与续聊规则、模板，以及可选的三宿主事件采集运行时。运行时保存来源、导出 Markdown、引导下一轮整理并记录批次确认，使用本地事件文件实现队列。本文中的独立后台观察者、SQLite 实现、MCP 服务和共享问题写入模块仍是后续方案；当前问题笔记的文件读改写不能提供完整并发保证。[当前运行时操作与覆盖范围](../skills/conversation-ledger/references/runtime.md)
 
 相关材料：[现象分析](./agent-conversation-topic-loss.zh-CN.md) · [现有机制调研](./agent-conversation-question-tracking-research.zh-CN.md)。
 
@@ -314,4 +314,4 @@ Codex 当前 Hooks 包含 `UserPromptSubmit`、`Stop`、`SessionStart` 和压缩
 
 此外检查：事件重试不重复建项、父子会话来源不重复、服务离线后可补写、未覆盖消息明确可见，以及旁观记录不会触发 Agent 自行继续执行。安装健康检查同时验证“事件送得进来”和“续聊材料回得去”；仅工具列表可见不算自动接入完成。
 
-本节是设计提案，尚未实现或安装这些适配器。
+本节记录完整目标。当前已提供 Codex、Claude Code 和 Pi 的文本/生命周期采集与上下文引导适配器；完整问题服务、独立后台观察和共享写入仍待实现。配置安装与真实宿主生效应分别验收。
