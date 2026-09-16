@@ -8,6 +8,8 @@
 
 ## 核心判断
 
+后续沉淀：[现有机制调研](./agent-conversation-question-tracking-research.zh-CN.md) · [Obsidian 与跨 Agent 设计](./obsidian-agent-question-tracking-design.zh-CN.md) · [可安装的 conversation-ledger Skill](../skills/conversation-ledger/README.md)。
+
 与 Agent 对话时，问题会不断分岔、重组和暂停；聊天记录则按时间顺序累积。如果缺少对问题关系、处理状态和后续意图的维护，就可能出现这样的体验：当时讨论得很充分，结束后却说不清还有哪些关键问题值得继续。
 
 这份分析以一个使用反馈为起点：

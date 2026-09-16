@@ -48,6 +48,18 @@ A skill that turns one sentence into an Orca child worktree with a coding agent 
 
 **Stack:** Orca CLI + Agent Skills (`SKILL.md`) + Claude Code / Codex CLI / omp
 
+## Installable Skills
+
+### [Conversation Ledger](./skills/conversation-ledger/)
+
+Preserve open questions, progress, evidence, and continuation cues as Markdown or Obsidian notes. Share a ledger across agents using stable question IDs. This first release provides instructions and templates; automatic runtime hooks and a shared writer remain design proposals.
+
+```bash
+npx --yes skills add cntuzi/ai-playbook --skill conversation-ledger -g -y
+```
+
+See the [skill guide](./skills/conversation-ledger/README.md) for prerequisites, explicit agent selection, and usage.
+
 ## Tips
 
 Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
@@ -57,6 +69,8 @@ Small, self-contained tricks — see [tips/](./tips/) (Chinese only).
 Observations and open questions from working with AI agents. These notes distinguish research evidence from hypotheses and record ideas that still need validation.
 
 - [Why key questions get lost in agent conversations](./notes/agent-conversation-topic-loss.zh-CN.md) (Chinese only) — How topic branching, unresolved questions, and missing resumption cues affect ongoing work; includes primary research and its limits.
+- [Existing mechanisms for question tracking](./notes/agent-conversation-question-tracking-research.zh-CN.md) (Chinese only) — Advisor, observational memory, and explicit issue ledgers, with verified capabilities and gaps.
+- [Obsidian and cross-agent question tracking design](./notes/obsidian-agent-question-tracking-design.zh-CN.md) (Chinese only) — Storage, resumption, runtime adapters, and what remains beyond the first skill release.
 
 ## Ramblings
 
@@ -123,6 +137,18 @@ AI 数据分析助手的三代演进，以及前两代为什么会输出「很�
 
 **技术栈：** Orca CLI + Agent Skills (`SKILL.md`) + Claude Code / Codex CLI / omp
 
+## 可安装 Skills
+
+### [Conversation Ledger / 对话问题台账](./skills/conversation-ledger/)
+
+将开放问题、讨论进展、依据和续聊入口保存为 Markdown 或 Obsidian 笔记，通过稳定问题 ID 在不同 Agent 间接着讨论。当前交付规则和模板；运行时自动触发与单一写入服务仍是设计提案。
+
+```bash
+npx --yes skills add cntuzi/ai-playbook --skill conversation-ledger -g -y
+```
+
+环境要求、指定 Agent 和使用方法见 [Skill 说明](./skills/conversation-ledger/README.md)。
+
 ## 小技巧
 
 独立的小技巧记录，不成体系但实用：
@@ -134,6 +160,8 @@ AI 数据分析助手的三代演进，以及前两代为什么会输出「很�
 与 AI Agent 协作过程中的观察和开放问题。记录研究依据、分析判断，以及仍待验证的部分。
 
 - [Agent 对话为什么会丢失关键问题](./notes/agent-conversation-topic-loss.zh-CN.md) —— 梳理多话题分岔、悬置问题和接续困难，分析问题关系与状态为何容易丢失，并保留一手研究及适用边界。
+- [问题追踪的现有机制调研](./notes/agent-conversation-question-tracking-research.zh-CN.md) —— 核验 Advisor、观察记忆和显式问题台账的能力与缺口。
+- [Obsidian 与跨 Agent 问题追踪设计](./notes/obsidian-agent-question-tracking-design.zh-CN.md) —— 记录与续聊、数据归属、宿主接入，以及 Skill 首版之后的运行时扩展。
 
 ## 碎碎念
 

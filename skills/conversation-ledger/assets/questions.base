@@ -1,0 +1,33 @@
+filters:
+  and:
+    - 'type == "conversation-question"'
+    - 'file.inFolder("{{vault_relative_ledger_root}}")'
+views:
+  - type: table
+    name: 待继续 / Open
+    filters:
+      and:
+        - 'status != "resolved"'
+        - 'status != "dropped"'
+        - 'status != "parked"'
+    order:
+      - file.name
+      - title
+      - status
+      - project
+      - updated
+  - type: table
+    name: 暂放 / Parked
+    filters: 'status == "parked"'
+    order:
+      - file.name
+      - title
+      - updated
+  - type: table
+    name: 全部 / All
+    order:
+      - file.name
+      - title
+      - status
+      - project
+      - updated

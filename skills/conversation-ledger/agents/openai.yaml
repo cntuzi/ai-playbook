@@ -1,0 +1,4 @@
+interface:
+  display_name: "Conversation Ledger"
+  short_description: "Track open questions and resume across agent conversations"
+  default_prompt: "Use $conversation-ledger to save the open questions, evidence, and next steps from this conversation."
