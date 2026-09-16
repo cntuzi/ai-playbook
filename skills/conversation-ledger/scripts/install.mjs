@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { atomicWrite, configFor, digest, json, localDir, readJSON } from './core.mjs';
+import { codexSettingsPath, withSettingsLocks } from './workspace.mjs';
 
 const SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOSTS = ['codex', 'claude-code', 'pi'];
@@ -77,64 +78,69 @@ export function install(workspace, hosts = HOSTS, selectedRoot) {
     } else if (!fs.statSync(root).isDirectory()) throw new Error(`Ledger root is not a directory: ${root}`);
 
     const allHosts = [...new Set([...(previous?.managed_hosts || previous?.hosts || []), ...hosts])];
-    const settingsPaths = { codex: '.codex/hooks.json', 'claude-code': '.claude/settings.local.json' };
-    const settings = {};
-    // Read every affected settings file before changing any of them.
-    for (const host of allHosts.filter((host) => host !== 'pi')) {
-      settings[host] = loadSettings(path.join(workspace, settingsPaths[host]));
-    }
-    const extension = path.join(workspace, '.pi/extensions/conversation-ledger.ts');
-    const existingExtension = fs.existsSync(extension) ? fs.readFileSync(extension, 'utf8') : null;
-    if (allHosts.includes('pi') && existingExtension !== null && !previous?.extension_versions?.includes(existingExtension)) {
-      throw new Error(`Existing Pi extension is not owned by this installer: ${extension}`);
-    }
-    const files = bundleFiles();
-    const bundleHash = digest(Buffer.concat(files.flatMap((file) => [Buffer.from(file.relative), Buffer.from('\0'), file.content])));
-    const skillPath = path.join(local, 'runtime', bundleHash, 'skill');
-    for (const file of files) {
-      const destination = path.join(skillPath, file.relative);
-      if (fs.existsSync(destination)) {
-        if (!fs.readFileSync(destination).equals(file.content)) throw new Error(`Modified runtime bundle: ${destination}`);
-      } else atomicWrite(destination, file.content, true);
-    }
-    fs.mkdirSync(root, { recursive: true });
-    if (!fs.existsSync(path.join(local, '.gitignore'))) atomicWrite(path.join(local, '.gitignore'), '*\n', true);
-    const node = process.execPath;
-    const script = path.join(skillPath, 'scripts/ledger.mjs');
-    const commandFor = (host) => [node, script, 'hook', '--workspace', workspace, '--host', host].map(shellQuote).join(' ');
-    const commands = [...new Set([...(previous?.commands || []), ...hosts.filter((host) => host !== 'pi').map(commandFor)])];
-    const piCode = `// Installed by conversation-ledger; configuration is in .conversation-ledger/runtime.json\nimport extension from ${JSON.stringify(path.join(skillPath, 'scripts/pi.mjs'))};\nexport default extension;\n`;
-    const config = { version: 1, enabled: true, installation_id: previous?.installation_id || randomUUID(),
-      hosts, managed_hosts: allHosts, node, skill_path: skillPath, commands,
-      extension_versions: [...new Set([...(previous?.extension_versions || []), ...(hosts.includes('pi') ? [piCode] : [])])] };
-    const backup = path.join(local, 'backups', randomUUID());
-    for (const host of allHosts.filter((host) => host !== 'pi')) {
-      const target = path.join(workspace, settingsPaths[host]);
-      if (fs.existsSync(target)) atomicWrite(path.join(backup, settingsPaths[host]), fs.readFileSync(target));
-    }
-    if (existingExtension !== null) atomicWrite(path.join(backup, 'conversation-ledger.ts'), existingExtension);
-    // Record ownership before installing hooks, so interrupted installations can be retried.
-    atomicWrite(mappingFile, json({ version: 1, root }));
-    atomicWrite(runtimeFile, json(config));
-    for (const host of allHosts.filter((host) => host !== 'pi')) {
-      const data = stripOwned(settings[host], commands);
-      if (hosts.includes(host)) {
-        const events = host === 'codex'
-          ? ['SessionStart', 'UserPromptSubmit', 'Stop', 'PreCompact', 'Interrupt']
-          : ['SessionStart', 'UserPromptSubmit', 'Stop', 'PreCompact', 'StopFailure'];
-        data.hooks ??= {};
-        for (const event of events) {
-          data.hooks[event] ??= [];
-          data.hooks[event].push({ hooks: [{ type: 'command', command: commandFor(host), timeout: event === 'Interrupt' ? 3 : 10 }] });
-        }
+    const settingsPaths = { codex: allHosts.includes('codex') ? codexSettingsPath(workspace) : path.join(workspace, '.codex/hooks.json'), 'claude-code': path.join(workspace, '.claude/settings.local.json') };
+    const settingsFiles = [...new Set([
+      ...allHosts.filter((host) => host !== 'pi').map((host) => settingsPaths[host]),
+      ...(previous?.settings_files || []),
+      ...(previous?.commands?.length ? [path.join(workspace, '.codex/hooks.json'), path.join(workspace, '.claude/settings.local.json')].filter((file) => fs.existsSync(file)) : []),
+    ])];
+    return withSettingsLocks(settingsFiles, () => {
+      const settings = {};
+      // Read every affected settings file before changing any of them.
+      for (const file of settingsFiles) settings[file] = loadSettings(file);
+      const extension = path.join(workspace, '.pi/extensions/conversation-ledger.ts');
+      const existingExtension = fs.existsSync(extension) ? fs.readFileSync(extension, 'utf8') : null;
+      if (allHosts.includes('pi') && existingExtension !== null && !previous?.extension_versions?.includes(existingExtension)) {
+        throw new Error(`Existing Pi extension is not owned by this installer: ${extension}`);
       }
-      atomicWrite(path.join(workspace, settingsPaths[host]), json(data));
-    }
-    if (hosts.includes('pi')) atomicWrite(extension, piCode);
-    else if (previous?.hosts.includes('pi') && existingExtension !== null) fs.unlinkSync(extension);
-    return { installed: hosts, root, runtime: script, backup,
-      next: ['Reload/restart the selected hosts.', ...(hosts.includes('codex') ? ['Codex requires project trust and review of the new definitions through /hooks.'] : []),
-        'Check status after a real user turn; configured does not mean active.'] };
+      const files = bundleFiles();
+      const bundleHash = digest(Buffer.concat(files.flatMap((file) => [Buffer.from(file.relative), Buffer.from('\0'), file.content])));
+      const skillPath = path.join(local, 'runtime', bundleHash, 'skill');
+      for (const file of files) {
+        const destination = path.join(skillPath, file.relative);
+        if (fs.existsSync(destination)) {
+          if (!fs.readFileSync(destination).equals(file.content)) throw new Error(`Modified runtime bundle: ${destination}`);
+        } else atomicWrite(destination, file.content, true);
+      }
+      fs.mkdirSync(root, { recursive: true });
+      if (!fs.existsSync(path.join(local, '.gitignore'))) atomicWrite(path.join(local, '.gitignore'), '*\n', true);
+      const node = process.execPath;
+      const script = path.join(skillPath, 'scripts/ledger.mjs');
+      const commandFor = (host) => [node, script, 'hook', '--workspace', workspace, '--host', host, '--scope-workspace'].map(shellQuote).join(' ');
+      const commands = [...new Set([...(previous?.commands || []), ...hosts.filter((host) => host !== 'pi').map(commandFor)])];
+      const piCode = `// Installed by conversation-ledger; configuration is in .conversation-ledger/runtime.json\nimport extension from ${JSON.stringify(path.join(skillPath, 'scripts/pi.mjs'))};\nexport default extension;\n`;
+      const config = { version: 1, enabled: true, installation_id: previous?.installation_id || randomUUID(),
+        hosts, managed_hosts: allHosts, node, skill_path: skillPath, commands, settings_files: settingsFiles,
+        extension_versions: [...new Set([...(previous?.extension_versions || []), ...(hosts.includes('pi') ? [piCode] : [])])] };
+      const backup = path.join(local, 'backups', randomUUID());
+      for (const target of settingsFiles) {
+        if (fs.existsSync(target)) atomicWrite(path.join(backup, `${digest(target)}.json`), fs.readFileSync(target));
+      }
+      if (existingExtension !== null) atomicWrite(path.join(backup, 'conversation-ledger.ts'), existingExtension);
+      // Record ownership before installing hooks, so interrupted installations can be retried.
+      atomicWrite(mappingFile, json({ version: 1, root }));
+      atomicWrite(runtimeFile, json(config));
+      for (const target of settingsFiles) {
+        const data = stripOwned(settings[target], commands);
+        const host = hosts.find((host) => settingsPaths[host] === target);
+        if (host) {
+          const events = host === 'codex'
+            ? ['SessionStart', 'UserPromptSubmit', 'Stop', 'PreCompact', 'Interrupt']
+            : ['SessionStart', 'UserPromptSubmit', 'Stop', 'PreCompact', 'StopFailure'];
+          data.hooks ??= {};
+          for (const event of events) {
+            data.hooks[event] ??= [];
+            data.hooks[event].push({ hooks: [{ type: 'command', command: commandFor(host), timeout: event === 'Interrupt' ? 3 : 10 }] });
+          }
+        }
+        atomicWrite(target, json(data));
+      }
+      if (hosts.includes('pi')) atomicWrite(extension, piCode);
+      else if (previous?.hosts.includes('pi') && existingExtension !== null) fs.unlinkSync(extension);
+      return { installed: hosts, root, runtime: script, backup, settings_files: settingsFiles,
+        next: ['Reload/restart the selected hosts.', ...(hosts.includes('codex') ? ['Codex requires project trust and review of the new definitions through /hooks.'] : []),
+          'Check status after a real user turn; configured does not mean active.'] };
+    });
   });
 }
 
@@ -148,26 +154,28 @@ export function disable(workspace) {
 }
 
 export function uninstall(workspace) {
+  workspace = fs.realpathSync(workspace);
   return withInstallLock(workspace, () => {
     const config = configFor(workspace);
-    const settingsPaths = { codex: '.codex/hooks.json', 'claude-code': '.claude/settings.local.json' };
-    const edits = [];
-    for (const [host, relative] of Object.entries(settingsPaths)) {
-      const target = path.join(workspace, relative);
-      if (!fs.existsSync(target)) continue;
-      const original = loadSettings(target);
-      const updated = stripOwned(structuredClone(original), config.commands);
-      if (json(original) !== json(updated)) edits.push({ target, updated });
-    }
-    atomicWrite(path.join(config.local, 'runtime.json'), json({ ...readJSON(path.join(config.local, 'runtime.json')), enabled: false }));
-    for (const { target, updated } of edits) atomicWrite(target, json(updated));
-    const extension = path.join(workspace, '.pi/extensions/conversation-ledger.ts');
-    let modifiedPiPreserved = false;
-    if (fs.existsSync(extension)) {
-      if (config.extension_versions.includes(fs.readFileSync(extension, 'utf8'))) fs.unlinkSync(extension);
-      else modifiedPiPreserved = true;
-    }
-    return { uninstalled: true, modified_pi_extension_preserved: modifiedPiPreserved,
-      retained: 'Conversation data, runtime bundles, and backups. Unrelated or manually modified hooks are preserved.' };
+    const settingsFiles = [...new Set([...(config.settings_files || []), path.join(workspace, '.codex/hooks.json'), path.join(workspace, '.claude/settings.local.json')])];
+    return withSettingsLocks(settingsFiles, () => {
+      const edits = [];
+      for (const target of settingsFiles) {
+        if (!fs.existsSync(target)) continue;
+        const original = loadSettings(target);
+        const updated = stripOwned(structuredClone(original), config.commands);
+        if (json(original) !== json(updated)) edits.push({ target, updated });
+      }
+      atomicWrite(path.join(config.local, 'runtime.json'), json({ ...readJSON(path.join(config.local, 'runtime.json')), enabled: false }));
+      for (const { target, updated } of edits) atomicWrite(target, json(updated));
+      const extension = path.join(workspace, '.pi/extensions/conversation-ledger.ts');
+      let modifiedPiPreserved = false;
+      if (fs.existsSync(extension)) {
+        if (config.extension_versions.includes(fs.readFileSync(extension, 'utf8'))) fs.unlinkSync(extension);
+        else modifiedPiPreserved = true;
+      }
+      return { uninstalled: true, modified_pi_extension_preserved: modifiedPiPreserved,
+        retained: 'Conversation data, runtime bundles, and backups. Unrelated or manually modified hooks are preserved.' };
+    });
   });
 }

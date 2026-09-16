@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { acknowledge, context, flush, handleHook, json, review, status } from './core.mjs';
 import { disable, install, uninstall } from './install.mjs';
+import { matchesWorkspace } from './workspace.mjs';
 
 const help = `Conversation Ledger runtime (Node.js 22+, macOS/Linux installer)
 
@@ -23,7 +24,7 @@ try {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     workspace: { type: 'string' }, agents: { type: 'string' }, root: { type: 'string' },
     host: { type: 'string' }, limit: { type: 'string' }, batch: { type: 'string' },
-    note: { type: 'string' }, help: { type: 'boolean' },
+    note: { type: 'string' }, help: { type: 'boolean' }, 'scope-workspace': { type: 'boolean' },
   } });
   command = positionals[0];
   if (values.help || !command) { process.stdout.write(help); }
@@ -48,7 +49,9 @@ try {
           if (size > 2 * 1024 * 1024) throw new Error('Hook payload exceeds 2 MiB; event was not saved');
           chunks.push(chunk);
         }
-        result = handleHook(workspace, values.host, JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        result = values['scope-workspace'] && !matchesWorkspace(workspace, payload.cwd ?? process.cwd())
+          ? {} : handleHook(workspace, values.host, payload);
         break;
       }
       default: throw new Error(`Unknown command: ${command}`);

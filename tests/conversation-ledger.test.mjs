@@ -8,6 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { acknowledge, capture, configFor, context, flush, handleHook, readJSON, review, status } from '../skills/conversation-ledger/scripts/core.mjs';
 import { disable, install, uninstall } from '../skills/conversation-ledger/scripts/install.mjs';
 import { registerPi } from '../skills/conversation-ledger/scripts/pi.mjs';
+import { withSettingsLocks } from '../skills/conversation-ledger/scripts/workspace.mjs';
 
 const cli = fileURLToPath(new URL('../skills/conversation-ledger/scripts/ledger.mjs', import.meta.url));
 function fixture(t, hosts = ['codex', 'claude-code', 'pi']) {
@@ -22,6 +23,56 @@ function savedEvents(workspace) {
   return fs.readdirSync(directory).map((name) => readJSON(path.join(directory, name)));
 }
 function putJSON(file, data) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(data)); }
+
+test('linked worktrees share discoverable Codex settings but capture only their own conversations', (t) => {
+  const parent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-worktree-')));
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  const primary = path.join(parent, 'primary');
+  const linked = path.join(primary, 'nested-worktree');
+  fs.mkdirSync(primary);
+  const git = (...args) => {
+    const result = spawnSync('git', ['-C', primary, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  git('init');
+  git('-c', 'user.name=Ledger Test', '-c', 'user.email=ledger@example.invalid', 'commit', '--allow-empty', '-m', 'fixture');
+  git('worktree', 'add', '-b', 'linked', linked);
+  const settings = path.join(primary, '.codex/hooks.json');
+  putJSON(settings, { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo user-owned' }] }] } });
+  install(primary, ['codex']);
+  install(linked, ['codex']);
+  // Migrate an older installation that put owned hooks only in the linked checkout.
+  const linkedSettings = path.join(linked, '.codex/hooks.json');
+  const oldConfig = configFor(linked);
+  putJSON(linkedSettings, { hooks: { Stop: [{ hooks: [{ type: 'command', command: oldConfig.commands[0] }] }] } });
+  const runtimePath = path.join(linked, '.conversation-ledger/runtime.json');
+  const legacy = readJSON(runtimePath);
+  delete legacy.settings_files;
+  putJSON(runtimePath, legacy);
+  install(linked, ['codex']);
+  assert.deepEqual(readJSON(linkedSettings), {});
+  const commands = readJSON(settings).hooks.UserPromptSubmit.flatMap((group) => group.hooks.map((hook) => hook.command));
+  assert.equal(commands.length, 2);
+  assert.ok(configFor(linked).settings_files.includes(settings));
+  for (const cwd of [primary, linked]) {
+    for (const command of commands) {
+      const result = spawnSync('/bin/sh', ['-c', command], { cwd, input: JSON.stringify(prompt({ cwd })), encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(JSON.parse(result.stdout).systemMessage, undefined);
+    }
+  }
+  assert.equal(status(primary).captured, 1);
+  assert.equal(status(linked).captured, 1);
+  // A shared settings lock protects simultaneous installers from losing another worktree's hooks.
+  const before = fs.readFileSync(settings, 'utf8');
+  withSettingsLocks([settings], () => assert.throws(() => install(linked, ['codex']), /Another installation/));
+  assert.equal(fs.readFileSync(settings, 'utf8'), before);
+  uninstall(linked);
+  assert.equal(readJSON(settings).hooks.UserPromptSubmit.length, 1);
+  assert.equal(status(primary).enabled, true);
+  uninstall(primary);
+  assert.equal(readJSON(settings).hooks.Stop[0].hooks[0].command, 'echo user-owned');
+});
 
 test('native event replays are idempotent, equal unidentified prompts are separate occurrences', (t) => {
   const { workspace, root } = fixture(t);

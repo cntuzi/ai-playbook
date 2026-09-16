@@ -20,6 +20,8 @@ The installer copies a self-contained, versioned runtime into the workspace and 
 
 Existing handlers and settings are preserved. Original configurations are backed up under `.conversation-ledger/backups/`. Reinstall after updating the skill to deploy the new runtime. The copied runtime stays available if the original skill installation moves.
 
+In a linked Git worktree, Codex reads project hooks from the matching directory in the primary checkout. The installer resolves that location, merges its scoped handlers there, and records the exact paths for uninstall. Each command checks the event's working directory before capture so another worktree's conversations are excluded. Shared settings edits use a lock, and reinstall removes obsolete owned hooks from the linked checkout. Data and runtime bundles remain in the selected worktree. This discovery rule is documented in the [Codex app-server reference](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md).
+
 Codex requires project trust and user review of new/changed hook definitions through `/hooks`; do not modify trust records or bypass the review. Pi project extensions also require a trusted project. Reload/restart the selected host and inspect its hook/extension status. Configuration alone is not proof that an event was delivered. These are host requirements, not an extra skill approval flow.
 
 ## What happens automatically
