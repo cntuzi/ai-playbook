@@ -126,7 +126,7 @@ Agent/
 
 ### 分析与设计
 
-- [成本：Token 开销计数与优化建议](../../notes/conversation-ledger-token-cost.zh-CN.md)
+- [成本：Token 开销计数与优化建议](https://github.com/cntuzi/ai-playbook/blob/main/notes/conversation-ledger-token-cost.zh-CN.md)
 - [现象：关键问题为什么会丢失](https://github.com/cntuzi/ai-playbook/blob/main/notes/agent-conversation-topic-loss.zh-CN.md)
 - [调研：Advisor、观察记忆与问题台账](https://github.com/cntuzi/ai-playbook/blob/main/notes/agent-conversation-question-tracking-research.zh-CN.md)
 - [设计：Obsidian 与跨 Agent 接入](https://github.com/cntuzi/ai-playbook/blob/main/notes/obsidian-agent-question-tracking-design.zh-CN.md)
